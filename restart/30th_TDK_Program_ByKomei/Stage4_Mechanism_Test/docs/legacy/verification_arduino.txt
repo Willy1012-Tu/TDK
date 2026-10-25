@@ -1,0 +1,22 @@
+驗證結果（2026-10-09，Asia/Taipei）
+
+tests/run_tests.cmd：通過 48 個獨立 Stage4 案例，以及 library_regression。
+MSVC /W4：最終主機編譯沒有警告。Stage4 核心使用 /WX。
+共用庫測試包含 CAN ID0/7/255 拒收、ID6 幀、負值位置、回報長度／校驗、
+軌跡到位、重設位置、PID 比例輸出及變速積分區間。
+
+tools/compile.ps1 -Board teensy40：成功。
+  FLASH code=50972、data=8136 bytes；RAM1 variables=20320 bytes。
+tools/compile.ps1 -Board teensy41：成功。
+  FLASH code=52060、data=8136 bytes；RAM1 variables=20352 bytes。
+平台：本機 Teensy board package 1.62.0，teensy-compile 15.2.1。
+兩次編譯均使用專案 Library/FlexCAN_T4、Library/Servo、Library/TeensyThreads，
+已由各自 compile_commands.json 確認 include 與來源編譯路徑。
+Stage4 不使用原有共用 PID／軌跡／舊 CAN 模組，這些模組以主機測試驗證。
+
+輸出與完整正式編譯紀錄：
+  ../../tmp/stage4-core-tests/
+  ../../tmp/stage4-build-teensy40/compile.log
+  ../../tmp/stage4-build-teensy41/compile.log
+兩份 .hex 在各自正式編譯資料夾；本次只编譯，沒有燒錄。
+實際 CAN 收發、尋原點、伺服行程及機構負載仍須實機驗證。

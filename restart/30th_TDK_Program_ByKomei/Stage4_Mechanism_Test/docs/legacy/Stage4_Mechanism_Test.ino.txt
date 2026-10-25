@@ -1,0 +1,4 @@
+// 第四關獨立機構測試：只有 ID6 步進及 Pin2、Pin5 伺服。
+#include "src/test_controller.h"
+void setup() { Stage4Test::begin(); }
+void loop() { Stage4Test::loop(); }

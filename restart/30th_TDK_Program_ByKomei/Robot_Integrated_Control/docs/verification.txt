@@ -1,0 +1,1088 @@
+最新驗證：移除 BNO055 與底盤航向補償（2026-10-15）
+  Teensy 4.0 / 4.1：tools/compile.ps1 成功，兩份編譯日誌無 warning/error。
+  韌體不再初始化／輪詢 BNO055；移除姿態 JSON、GUI 姿態卡及偏航補償。
+  底盤保留搖桿90 turns/s、115安全限幅、15ms CAN、ICR與加減速。
+  原生回歸473/481通過：底盤RC98/98、motion31/31、PWM17/17；
+  mechanism203/205、system89/91、bench35/39。
+  八項失敗皆以修改前備份重現：現行第二關4段/2000ms與測試舊6段/3000ms不符。
+  完整run_tests.ps1仍因上述既有YAML期待值失敗；未改寫使用者第二關YAML。
+  YAML20/21、HTTP85/86（各一項同類第二關設定差異）；Node前端回歸通過。
+  新增manual_chassis_no_imu_dependency通過：沒有IMU欄位／警告、
+  未設定GPIO18/19、正常輪速排程與STOP。實際serial JSON可解析且九伺服/三MKS保留。
+  機構、RC、電缸、PWM與全車安全控制器檔案與修改前完全相同。
+  .pio/logs/imu-removal-native-results.json：逐套測試結果；
+  .pio/logs/imu-removal-baseline.json：八項修改前失敗交叉確認。
+  僅編譯與主機模擬，未燒錄／未實車測試；更新需燒錄韌體、重開GUI並重新整理網頁。
+
+以下為歷次紀錄，舊IMU功能描述已失效。
+------------------------------------------------------------
+目前有效結果：四軸開機工作電流設定（2026-10-13，Asia/Taipei）
+目前韌體：firmware_id=Robot_Integrated_Control
+          firmware_revision=selective-home-stage3-imu-current-all-yaw-rc-v1
+目標板：Teensy 4.0（teensy40）；本輪未燒錄、未連COM操作實車。
+
+配置與控制架構
+  include/system_config.h集中STARTUP_CURRENT_SETTINGS={4:3000,5:3000,6:5200,7:3000}，單位mA。
+  ID4/5/7為SERVO42D=3000mA；ID6為SERVO57D=5200mA。
+  validStartupCurrents驗證非零、不超過MAX_CURRENT_MA、節點屬於active MOTOR_IDS且不重複。
+  沿用既有非阻塞table-driven啟動狀態機：每軸8C ACK1→83 ACK1→F3 ACK1，按4/5/6/7順序。
+  所有設定確認後才92原位設零ID4/5；只有ID6/7可91實體尋原點，兩軸完成後才Ready。
+  ID4/5開機仍不發91／FE；其新增83電流設定不要求移動機構。
+  CAN1 1Mbps標準幀DLC4：ID4 [83 0B B8 4A]、ID5 [83 0B B8 4B]、
+  ID6 [83 14 50 ED]、ID7 [83 0B B8 4D]；checksum含CAN ID，mA為uint16大端序。
+  ACK1才記錄保存確認；ACK2不視為保存成功；ACK0立即Fault，全域停止。
+  非移動設定每500ms重試，首次成功enqueue起固定10s期限；成功91/FE不重送。
+  include/mechanism_controller.h及src/mechanism_controller.cpp新增current4Ma/current5Ma回報。
+  src/serial_gateway.cpp在status／hello增加current4_ma/current5_ma；保留其他欄位與protocol1。
+  current_configured_mask按ID4..7 bits0..3變為0→1→3→7→15；与position_known_mask分開。
+  已確認設定值不是實際電流量測；四軸電流ACK全部收到不等於設零／尋原點完成。
+
+完整主機回歸：全部PASS
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/run_tests.ps1：exit0。
+  MSVC /std:c++17 /W4 /WX：零編譯警告／錯誤。
+  101機構 + 74底盤/RC + 36整車 + 19IMU = 230個C++案例。
+  11 YAML + 30 Web/HTTP = 41個Python案例；Node frontend及嚴格JSON解析PASS。
+  精確四軸83封包／ACK順序與遮罩、ID4/5拒絕／固定逾時與F3/92/91屏障已驗證。
+  全車ID4/5電流ACK等待期間，15ms底盤發送、CRSF更新與USB狀態回報持續運作。
+  既有6/7重試、錯誤／早到／遲到ACK、STOP與millis溢位、四關機構、RC重映射及yaw案例持續通過。
+  status_fixture.json：current4_ma=3000,current5_ma=3000,current6_ma=5200,current7_ma=3000，
+  current_configured_mask=15、position_known_mask=15；JSON大小2054bytes，低於USB_REPLY_BYTES=3072。
+  記錄：.pio/logs/host-tests.log。
+
+PlatformIO：teensy40 SUCCESS
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/compile.ps1 -Board teensy40：exit0。
+  build_src_flags=-Wall -Wextra -Werror；零警告／零錯誤。
+  .pio/build/teensy40/firmware.hex：504137bytes。
+  SHA256 5F630A5292F666F6EE64A24003768FE3C75932D8F30CAD67975E99BA901E71E7
+  編譯記錄：.pio/logs/teensy40.log。
+
+範圍與交付
+  main、底盤/RC演算法、IMU驅動、CAN transport、四份關卡YAML、Web資產及Stage4_Mechanism_Test未改動。
+  最新通道映射及85/15/100航向補償速度預算保持原設定。
+  需燒錄本次韌體才會在實車開機設定電流；實際成功仍需確認馬達ACK／面板。
+  修改前備份：C:\Users\User\AppData\Local\Temp\codex_tdk30th_current45_20261013_213835。
+
+======== 以下為既有歷史記錄；舊電流表、通道、韌體、測試數量與雜湊不代表目前結果 ========
+
+目前有效結果：RC通道重映射（2026-10-12，Asia/Taipei）
+目前韌體：firmware_id=Robot_Integrated_Control
+          firmware_revision=selective-home-stage3-imu-current-yaw-rc-v1
+目標板：Teensy 4.0（teensy40）；本輪未燒錄、未連COM操作實車。
+
+現行映射
+  CH1自轉，CH2前後，CH3平移；CH4空閒。
+  CH5上一動PREV，CH6下一動NEXT；CH9僅清除四顆ODrive錯誤。
+  CH10第一關、CH11第二關、CH12第三關、CH13第四關；原CH14已不選關。
+  include/system_config.h集中設定；搖桿原min/middle/max校準值照附件保留。
+  validRcMapping在編譯時檢查十個控制角色均為1..16且不重複，防止清錯與選關撞號。
+  rc_controller沿用集中配置，不更改30ms防彈跳、上升緣、放開再按、忙碌不排隊及安全互鎖。
+  src/serial_gateway.cpp僅更新韌體版本；rc.channels仍以CH1..16順序回報16個原始值。
+  USB/Web不依舊通道索引控制，無需改Web程式；功能文件已同步現行通道與版本。
+
+完整主機回歸：全部PASS
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/run_tests.ps1：exit0。
+  MSVC /std:c++17 /W4 /WX：零編譯警告／錯誤。
+  96機構 + 74底盤/RC + 34整車 + 19IMU = 223個C++案例。
+  11 YAML + 30 Web/HTTP = 41個Python案例；Node frontend與嚴格USB JSON解析PASS。
+  新增9個C++情境：映射契約、CH2正反前後、CH3正反平移、CH4空閒不影響解鎖、
+  CH14不選關、CH11選第二關不清錯、CH9清錯不選關，以及兩個對應真整車模組情境。
+  CH11整車測試確認第二關自動預備STEP1完成且沒有0x18；CH9確認四輪各收一次0x18、
+  不新增機構FE與不切換動作表；按鍵保持不重複觸發。
+  既有選關防彈跳、第三關Park、下一步／上一步、清錯重試與STOP鎖存持續通過。
+  航向85/15/100預算、CH1手動旋轉優先、200ms鎖航向與IMU降級案例持續通過。
+  status_fixture.json原始channels=[1454, 1416, 1500, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 2000, 1000, 1000, 1000]。
+  記錄：.pio/logs/host-tests.log。
+
+PlatformIO：teensy40 SUCCESS
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/compile.ps1 -Board teensy40：exit0。
+  build_src_flags=-Wall -Wextra -Werror；零警告／零錯誤。
+  .pio/build/teensy40/firmware.hex：504137 bytes。
+  SHA256 E0ED4FB9B0146982A6305D22464AC726E07E66E2EB456121F16159E57D6F0615
+  編譯記錄：.pio/logs/teensy40.log。
+
+範圍與交付
+  main、底盤演算法、IMU驅動、CAN transport、機構、四份YAML、Web資產及Stage4_Mechanism_Test未改動。
+  開機電流、6/7尋原點、4/5原位設零與現場關卡參數保持原值。
+  使用新映射需將本次韌體燒錄至Teensy；測試使用硬體stub，未驗證實體遙控器輸出。
+  修改前備份：C:\Users\User\AppData\Local\Temp\codex_tdk30th_remap_20261012_222738。
+
+======== 以下為既有歷史記錄；舊通道、韌體、測試數量與雜湊不代表目前結果 ========
+
+目前有效結果：IMU航向補償與85/15/100速度預算（2026-10-12，Asia/Taipei）
+目前韌體：firmware_id=Robot_Integrated_Control
+          firmware_revision=selective-home-stage3-imu-current-yaw-v1
+本次目標板：Teensy 4.0（teensy40）；platformio.ini的default_envs仍為teensy40。
+
+實作與介面
+  Chassis::JOYSTICK_MAX_SPEED=85、SAFETY_MAX_SPEED=100；舊MAX_SPEED識別字引用已全部更新。
+  YawCompensation集中配置ENABLED=true、KP=1 turns/s/degree、MAX_CORRECTION=15、LOCK_DELAY_MS=200。
+  按使用者確認，CORRECTION_SIGN預設+1，可單獨改為-1；誤差為wrap(current-target)。
+  mixWheels先按85等比例歸一化，再直接加[-c,-c,+c,+c]，最後各輪clamp到[-100,100]。
+  補償不參與歸一化；編譯期assert限制速度預算、KP、方向與鎖定延遲。
+  航向狀態每poll更新；只透過既有15ms速度週期發送四輪命令，沒有額外補償CAN幀。
+  Running且CH1在死區、IMU available/valid與finite yaw成立，連續200ms後捕捉當下最新航向。
+  初次就緒、手動旋轉回中、IMU恢復及底盤重新解鎖，都建立新的200ms計時。
+  manual旋轉優先；Locked/Arming/STOP/reset清補償及目標。Running全搖桿置中仍可原地修正航向。
+  IMU失效或NaN/Infinity僅清補償、回到純搖桿；不新增底盤lock或全車STOP。
+  wrapAngle採finite檢查與fmod有界計算；無delay、無浮點while環繞迴圈。
+  Status／chassis.yaw_compensation加入active/locked/target/current/error/correction。
+  在chassis.poll前先讀status時，fresh ODrive故障、非閉迴路或過期心跳也會立即抑制補償旗標。
+  分檔責任、狀態流程、調整參數與欄位單位詳見docs/yaw_compensation.txt與docs/errors.txt。
+
+實際完整回歸：全部 PASS
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/run_tests.ps1：exit0。
+  MSVC /std:c++17 /W4 /WX：0 compiler diagnostics。
+  96機構 + 67底盤/RC + 32整車 + 19IMU = 214 C++案例。
+  11 YAML generator + 30 Web/HTTP = 41 Python案例；Node frontend PASS。
+  新增31個底盤／RC yaw情境及8個完整main loop/真IMU驅動stub情境。
+  包含正負P補償/±15飽和、359↔1度與±180邊界、NaN/±Inf、worst-case輪速預算、
+  199/200ms重新鎖定、手動旋轉/快速回中、底盤與IMU各種失效恢復、STOP、millis溢位、
+  pre-poll錯誤狀態、每15ms四幀輸出、第四關servo緩移時CAN/RC持續服務。
+  嚴格解析實際serial JSON（拒絕NaN/Infinity常數）；新增6欄相容、有效/未接/斷線情境均通過。
+  active fixture輪速[-100,70,100,-70]；IMU失效後回到[-85,85,85,-85]且底盤仍Running。
+  status_fixture.json: 1953 bytes；yaw_compensation={"active":false,"locked":false,"target":0.0,"current":0.0,"error":0.0,"correction":0.0}
+  yaw_status_fixture.json: 1949 bytes；yaw_compensation={"active":true,"locked":true,"target":10.0,"current":30.0,"error":20.0,"correction":15.0}
+  yaw_invalid_status_fixture.json: 1953 bytes；yaw_compensation={"active":false,"locked":false,"target":0.0,"current":0.0,"error":0.0,"correction":0.0}
+  所有上述回覆均低於USB_REPLY_BYTES=3072。記錄：.pio/logs/host-tests.log。
+
+PlatformIO實際編譯
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/compile.ps1 -Board teensy40：exit0。
+  build_src_flags=-Wall -Wextra -Werror；teensy40 SUCCESS，零警告／零錯誤。
+  .pio/build/teensy40/firmware.hex：504137 bytes。
+  SHA256 EFB49B5805DDBF672FD6F55E9E0E915D512112BEEDEE040A13ACA1FF00F7C893
+  編譯記錄：.pio/logs/teensy40.log。本次以使用者指定teensy40驗證；下方舊teensy41紀錄屬歷史。
+
+範圍與實機限制
+  main.cpp、IMU驅動與imu_config.h、RC模組、CAN transport、機構控制器、YAML、Web資產、
+  Stage4_Mechanism_Test皆以修改前雜湊核對維持原檔；system_config中的Mechanism配置保持原值。
+  ID6=5200mA、ID7=3000mA的開機83流程與6/7尋原點、4/5原位設零仍由既有機構模組管理。
+  本次未燒錄、未連COM操作實車；主機測試不等於已量測實體修正方向或KP穩定性。
+  使用者回答「尚未測過，先照附件」，故SIGN=+1是明確選定初值，現場方向和增益仍需實測。
+  修改前備份：%TEMP%/codex_tdk30th_yaw_20261012_210618。
+
+======== 以下為既有歷史記錄；舊韌體、測試數量與雜湊不代表目前結果 ========
+
+目前有效結果：開機 CAN 0x83 電流設定（2026-10-12，Asia/Taipei）
+目前韌體：firmware_id=Robot_Integrated_Control
+          firmware_revision=selective-home-stage3-imu-current-v1
+
+變更架構與行為
+  include/system_config.h 的 STARTUP_CURRENT_SETTINGS={{6,5200},{7,3000}}，單位 mA。
+  同一設定表供控制器選擇節點、編碼 payload、序列 JSON 公告；靜態檢查節點/範圍/重複值。
+  src/mechanism_controller.cpp 增加 CurrentQueue/CurrentWait，共用既有非阻塞設定回報處理。
+  ID4/5：8C ACK1 -> F3 ACK1；不發83、不發91。
+  ID6：8C ACK1 -> 83(5200 mA) ACK1 -> F3 ACK1。
+  ID7：8C ACK1 -> 83(3000 mA) ACK1 -> F3 ACK1。
+  完成四顆設定後：92建立4/5原地零點，再同步91尋零6/7，等待兩顆完成才 Ready。
+  CAN1 標準幀：ID6 DLC4 [83 14 50 ED]；ID7 DLC4 [83 0B B8 4D]。
+  83 為 working current（Ma），本版採標準保存格式、只接受ACK1，不改HM_Ma或HoldMa。
+  非移動設定每500ms重試；從首次成功入列起固定10s ACK期限，不被重試延長。
+  ACK0立即故障；無有效ACK則逾時故障；禁止越過電流握手直接啟用/尋零。
+  STOP/故障停用整車馬達並取消設定重試；已接受的91/FE運動不重送。
+  @1 status / @1 hello 新增 startup_current_ma、current6_ma、current7_ma、
+  current_configured_mask、startup_current_settings；ACK後mask由0->4->12。
+  current6_ma/current7_ma 為本次ACK確認設定值，不是實際電流量測。
+  設定、控制、通訊與人工驗證方式詳見 docs/startup_current.txt。
+
+實際執行驗證：全部 PASS
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/run_tests.ps1：exit0。
+  MSVC /std:c++17 /W4 /WX：0 compiler diagnostics。
+  96機構 + 36底盤/RC + 24整車 + 19IMU = 175 C++ 案例。
+  11 YAML generator + 30 Web/HTTP = 41 Python 案例。
+  Node frontend 與 firmware 真正 serial JSON fixture 相容性通過。
+  15項新增機構情境檢查精確封包、6/7電流回報、F3屏障、拒絕、固定逾時、
+  重試入列、early/late/wrong ACK（包含ACK2）、STOP、millis溢位和手動動作不重寫83。
+  3項新增整車情境檢查83等待時15ms底盤發送與CRSF更新、7號拒絕全域STOP，
+  以及83等待時USB STOP取消重試。既有第三關Park、IMU降級、四關動作持續通過。
+  產出的實際 JSON：1835 bytes，低於 USB_REPLY_BYTES=3072；Ready時 current6_ma=5200、
+  current7_ma=3000、current_configured_mask=12，position_known_mask=15。
+  記錄：.pio/logs/host-tests.log、teensy40.log、teensy41.log。
+
+PlatformIO 實際編譯
+  teensy40: SUCCESS, 0 warnings / 0 errors; HEX 501257 bytes
+    SHA256 E92CD7B5C8467FF2E74367C8590BB613137BDF1FDBDEF04EA65A2DD22E2FAC92
+  teensy41: SUCCESS, 0 warnings / 0 errors; HEX 504137 bytes
+    SHA256 2030A3CF9EA933C3D45F7DE70B3E0336786CBE14D4E3E54809D0C38D19095BE5
+
+範圍與限制
+  本次僅修改 Robot_Integrated_Control 的電流設定/啟動/回報、必要測試與說明。
+  Stage4_Mechanism_Test、四份關卡YAML、CAN transport、底盤/RC與IMU程式未改動。
+  主機測試使用CAN/PWM/Serial硬體stub；未燒錄、未連線控制實體馬達、未量測電流，
+  也未進行實機CAN bus-off恢復測試。板端電流實際設定成功需以實機ACK/面板確認。
+  修改前備份：%TEMP%/codex_tdk30th_current67_20261012_202616。
+
+======== 以下為既有歷史記錄；舊韌體版本、測試數量與雜湊不代表目前結果 ========
+
+四顆步進／六PWM、選擇性尋零、第三關及BNO055驗證（2026-10-12，Asia/Taipei）
+目前版本：firmware_id=Robot_Integrated_Control；firmware_revision=selective-home-stage3-imu-v1。
+
+目前配置與動作
+  MOTOR_IDS={4,5,6,7}；SERVO_PINS={2,3,4,5,6,9}；待機1150,2250,2000,2100,1400,1800us。
+  全四軸確認8C/F3後，僅ID4/5使用官方92原地建立driver FE零點、不轉動；各成功ACK才known。
+  STARTUP_RETURN_ZERO=true；只有ID6/7在同批發91GoHome，兩顆各自開始及完成才Ready。
+  開機沒有向4/5發91或FE；mask0→92成功後3→91逐軸完成7/11→15。
+  8C/F3/92有限ACK重試，固定10秒期限；已接受91/FE不重送，仍有開始/完成逾時與全車STOP。
+  STAGE3_ENABLED=true；CH14選關及Web/RAM可執行第三關；首次NEXT才STEP1，repeat_from=2。
+  雙FE位置(-4200,+4200)→(0,0)→(-2000,+2000)→(-4200,+4200)，四段Pin3=1680。
+  HOME3以FE回0/0、Pin3=2250；Debug GoHome4/5拒絕，正常FE點動可用。
+  切出第三關等待當段完成後Park(-2000,+2000,Pin3=2250)，雙步進完成才啟用目標關／RAM表。
+  Prev、parallel與RAM屏障擴至16位，可同時支援四步進六PWM共10致動器。
+  第一、二、四關現行YAML保留現場調參；回歸按generated內容驗證，不重設動作模板。
+
+IMU架構與可觀察狀態
+  src/imu_controller.cpp＋include/imu_controller.h/imu_config.h；LPI2C1硬體，SDA18/SCL19，100kHz。
+  探測28失敗再29；NDOF預設0x0C，可配置IMU0x08；POR650ms/模式切換等待為deadline。
+  無Wire同步讀写、delay、主線busy wait、IRQ迴圈或動態memory；每poll最多4TX/4RX。
+  15ms硬體pin-low與20ms軟體transaction截止；失敗退避1秒重探，僅IMU降級、不停止全車啟動。
+  CAN/USB/RC/底盤/機構先服務，最後IMU；Euler每20ms排程、health確認SYSSTAT5/SYSERR0才publish。
+  yaw/pitch/roll單位度；沒有有效新鮮樣本為JSON null；GUI顯示--並列phase/age/error。
+  calibration為原始0x35 byte；valid代表新鮮融合樣本，不宣稱實體校正完成。
+  RX/STOP同時到達且FIFO仍有尾端資料的邊界先RED，再修成後續bounded drain才判讀取不足。
+
+實際完整主機驗證：全部PASS
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/run_tests.ps1，exit0。
+  MSVC C++17 /W4 /WX，0 compiler diagnostics。
+  81機構+36底盤/RC+21整車+19IMU=157 C++案例。
+  11YAML generator+30Web/HTTP=41 Python；Node frontend及真實serial JSON fixture皆PASS。
+  覆蓋全4軸設定→92→雙91屏障、92拒絕/缺ACK/重試/期限、91/FE逾時及全部四MKS六PWM STOP；
+  第三關cycle/Prev/HOME/雙Park等待與pending切關、10裝置parallel/高位重複拒絕/缺屏障拒絕；
+  IMU地址fallback/錯chip/NACK/仲裁/clock stretch/FIFO/TX阻塞/ShortRead/RXSTOP邊界/符號Euler/health/stale/時鐘溢位；
+  實際main loop的IMU未接與stalled時15ms底盤發送/CRSF持續/STOP正常，以及有效角度45/-10/20的wireJSON。
+  記錄：.pio/logs/host-tests.log、imu-focused.log、imu-rx-red.log。
+
+實際Web啟動器HTTP檢查：PASS
+  tools/start_web_gui.ps1隱藏localhost Port=60951啟動。
+  GET /、app.js、style.css、四關api/init與api/state皆成功；四關step數4/4/4/6、repeat1/2/2/1。
+  第三關全部雙FE絕對座標、320RPM及Pin3=1680驗證符合要求。
+  connected=false、firmware=null；未POST連COM或動作，owned程序與TCP端口已關閉。
+  記錄：.pio/logs/web-gui-smoke.json。
+
+實際正式PlatformIO編譯：兩板SUCCESS，零警告／錯誤
+  tools/compile.ps1 -Board teensy40，再 -Board teensy41；未upload。
+  Teensy6.0.0、Arduino1.162.0、GCC15.2.1；4份generated headers齊全。
+  teensy40：
+    teensy_size:   FLASH: code:79136, data:89032, headers:8980   free for files:1854468
+    teensy_size:    RAM1: variables:141248, code:77400, padding:20904   free for local variables:284736
+    teensy_size:    RAM2: variables:12416  free for malloc/new:511872
+    firmware.hex：498377 bytes
+      SHA256 5FAB850C690079FF6F2429FC8F76F5F079CCBA2218C140409A0956DC6D6B3BA5
+    firmware.elf：241904 bytes
+      SHA256 6098D3CCFD3D305E59F25EF3CA933AC39DCC639123683B19740EE5095DA1625F
+    記錄：.pio/logs/teensy40.log
+  teensy41：
+    teensy_size:   FLASH: code:80160, data:89032, headers:8980   free for files:7948292
+    teensy_size:    RAM1: variables:141280, code:77592, padding:20712   free for local variables:284704
+    teensy_size:    RAM2: variables:12416  free for malloc/new:511872
+    firmware.hex：501257 bytes
+      SHA256 C8BC19CA8FA143B7BA9A255422CFF187BC8403F9B97C31789786BAF141FE1349
+    firmware.elf：243512 bytes
+      SHA256 B9221AD6E9EF904F4770A70D9593470279FAACAD83FFFD7CCC7F50D6858F1950
+    記錄：.pio/logs/teensy41.log
+
+限制與使用
+  尚未燒錄、開啟實際COM或操作機構，主機模擬不取代真實CAN/I2C電氣、HM設定、行程或姿態精度測量。
+  燒錄後可用@1 hello核對revision、motor_ids、servo_pins、startup_home_ids/hold_ids。
+  若舊GUI服務仍運行，關閉其終端並重啟tools/start_web_gui.ps1，讓Python載入新後端與generator。
+
+以下全部為歷史紀錄；旧版單ID6/7、第三關停用、未接IMU等配置不代表本版。
+
+ID6／ID7開機雙軸尋零與第二關完整循環驗證（2026-10-12，Asia/Taipei）
+
+目前硬體與開機
+  firmware_id=Robot_Integrated_Control；firmware_revision=stage2-id67-home-v1。
+  MOTOR_IDS={6,7}；SERVO_PINS={2,5,4,6,9}；STAGE3_ENABLED=false。
+  STARTUP_RETURN_ZERO=true。兩軸的8C/F3全部ACK成功後，同一非阻塞排程批次各送91。
+  不等待ID6完成才發ID7；兩軸分別收到start ACK1／completion ACK2才Ready。
+  position_known_mask為0→4或8→12，bit2=ID6、bit3=ID7；兩顆完成後position6/7=0。
+  8C/F3每500ms重試，固定10秒期限；已接受的91/FE不重送，1.5秒開始及30秒完成保護維持。
+  Pin2=1150us、Pin5=2100us、Pin4=2000us、Pin6=1400us、Pin9=1800us；Pin3不attach。
+  ID4/5不發開機、運動、Debug或停止CAN；第三關單段delay0待機且不Park。
+
+第二關行為
+  CH13切入時自動STEP1一次：ID7=-8000、320RPM、ACC2；Pin9=1800、Pin4=1300。
+  預備完成後每按NEXT依序STEP2→STEP3→STEP4→STEP2，repeat_from=2；四段合計15內部Action。
+  STEP2：Pin9=1100、Pin4=2000；STEP3：ID7=-3000、Pin6=2200；
+  STEP4：Pin6=1600、ID7=-8000、Pin9=1800、Pin4=1300；各段parallel同動。
+  重選已在第二關不重做STEP1；新第二關RAM表commit自動啟動STEP1並等待實際完成。
+  CH5還原前一完成狀態，包括預備前位置；採FE反向還原，動作中不排隊。
+  HOME2只91尋零ID7並恢復三PWM待機；HOME1/4只尋零ID6，不影響另一軸。
+  Debug支援FE/91 ID6及7；STOP全域停用兩MKS、detach五PWM、四輪ODrive速度0且IDLE。
+
+最終實際主機／GUI測試：PASS
+  實際test/run_tests.ps1 exit0；MSVC C++17 /W4 /WX，0診斷。
+  65機構+36底盤/RC+17整車=118 C++；11generator+28Web=39 Python；Node frontend與wire JSON全部PASS。
+  測試涵蓋雙軸設定ACK、並行尋零、單軸完成不提前Ready、另一軸逾時、兩軸STOP、座標bit2/3、
+  ID7 Web/Serial點動、四段RAM傳輸、第二關自動預備與循環/Prev、預備期间底盤15ms速度與RC更新。
+  記錄：.pio/logs/host-tests.log。
+  實際tools/start_web_gui.ps1隱藏localhost啟動，Port=65511。
+  GET /、/app.js、/style.css、profile1/2/3/4、/api/state全部成功；steps=4/4/1/6。
+  Stage2 repeat_from=2及四段全部ID7/PWM/rpm/acc驗證正確；其他關repeat1，Stage3僅delay0。
+  connected=false、firmware=null，未POST連COM或動作；owned程序及TCP端口已關閉。
+  記錄：.pio/logs/web-gui-smoke.json。
+
+最終正式PlatformIO編譯：PASS
+  teensy40／teensy41均SUCCESS，保存log中0 warning/error/fatal/FAILED。
+  Teensy6.0.0、Arduino1.162.0、GCC15.2.1；四份YAML generated headers生成正常。
+  記錄：.pio/logs/teensy40.log、teensy41.log。
+  teensy40 firmware.hex：481097 bytes
+    SHA256 6D076C080166BC99EC40A5973640C69DE8C4A505571CC5771AA53F783D5D3D1D
+  teensy41 firmware.hex：483977 bytes
+    SHA256 657813A73B6BD68EFA276FBCED30C67E02ED56F9E3AA77DAB7EBD1B8BD03327E
+  未燒錄、未開啟實際COM或操作機構；本紀錄不包含實機CAN電氣、HM參數與行程測試。
+
+以下為歷史紀錄，單ID6／不自動尋零等舊配置不代表目前版本。
+
+第二關文蛤分級與未接線第三關停用驗證（2026-10-12，Asia/Taipei）
+
+目前有效硬體與開機行為
+  firmware_id=Robot_Integrated_Control，firmware_revision=stage2-only6-v1。
+  MOTOR_IDS={6}，SERVO_PINS={2,5,4,6,9}，STAGE3_ENABLED=false。
+  STARTUP_RETURN_ZERO=false；一秒開機等待後，只向ID6發8C 01 01與F3 01。
+  設定ACK成功即Ready；不發91、FE、FD、80、92，不因未接線ID4/5等待或逾時。
+  Pin2=1150us、Pin5=2100us、Pin4/6/9各1500us；Pin3完全不attach。
+  ID4/5在開機、Debug、RAM、運動及停止皆不發CAN。
+  開機沒有重設MKS內部FE座標：position_known_mask=0；第一次有效FE或手動91
+  收到完成回報後ID6的bit2設位（mask4）。GUI顯示「尚未確認位置」直到有效完成。
+  第三關為單段delay0待機，Next/Prev/Run/Home與切出無致動器命令，不执行Park。
+  第三關不能透過Debug或RAM設定注入任何致動器動作。
+
+第二關操作與相容性
+  CH13選第二關；切關後CH5/6須先放開至少30ms，按鍵忙碌時不排隊。
+  CH6第一動：Pin4和Pin9同時1800us；第二動：兩顆同時1300us；第三動：Pin6=2000us。
+  repeat_from=1，下一次從第一動循環；Pin6依YAML保持2000us，直到另有命令。
+  CH5回到上一個完成狀態；HOME2恢復三顆新伺服各1500us，不發步進尋零。
+  HOME1/HOME4及有效ID6 Debug GoHome保留手動91。
+  產生器、內建表、RAM平行動作、快照/Prev、五伺服缓移、USB JSON、Web滑桿全部支援新腳位。
+  STOP停止並停用ID6、detach五顆PWM，四輪ODrive同時速度0且IDLE，保持鎖存。
+
+完整實際主機驗證：PASS
+  從本實際中文路徑執行 test/run_tests.ps1，exit0。
+  MSVC C++17 /W4 /WX：53機構+36底盤/RC+14完整系統=103個C++案例PASS，0編譯診斷。
+  11YAML產生器+23Web/HTTP=34個Python方法PASS；Node前端回歸PASS。
+  真實serial_gateway JSON fixture經json.loads驗證：onlyID6、五PWM、新三顆1500us、
+  startup_return_zero=false、mask0、四關及原底盤/RC/STOP資料保持相容。
+  測試涵蓋第二關三段/循環/Prev、CH13/CH14實際RC解析、第三關零CAN/零PWM、
+  非法硬體與RAM拒絕、Pin4/6/9 Web點動/parallel RAMpayload、mask0/4顯示、
+  Startup ACK恢復/固定期限/明確拒絕、USB背壓STOP、伺服緩移期間15ms底盤發送。
+  紀錄：.pio/logs/host-tests.log。
+
+實際Web啟動器檢查：PASS
+  tools/start_web_gui.ps1隱藏背景啟動，BindAddress=127.0.0.1，測試Port=60504。
+  GET /、/app.js、/style.css均200。
+  /api/init的profile1/2/3/4均200，steps=4/3/1/6，repeat_from全部1。
+  第二關三段與parallel脚位/脈寬完全符合要求；第三關只有delay0。
+  /api/state connected=false、firmware=null；未發POST connect/command/apply。
+  測試程序已關閉，確認此次TCP端口關閉。紀錄：.pio/logs/web-gui-smoke.json。
+
+正式PlatformIO編譯：PASS
+  tools/compile.ps1 -Board teensy40及teensy41均SUCCESS；最終兩份記錄0 warning/error/fatal/FAILED。
+  Teensy平台6.0.0、Arduino framework1.162.0、GCC15.2.1；四份YAML標頭均成功生成。
+  紀錄：.pio/logs/teensy40.log、teensy41.log。
+  teensy40 firmware.hex：478217 bytes
+    SHA256 730FAF56E02FEFCEDDF46FBADCE0332E88A6D01A6308B0EF1C554DE533976F53
+  teensy41 firmware.hex：481097 bytes
+    SHA256 7D81C757AF79C9DE942BDB993F81CD0FD597E544D16D286F1BCC13338EE3B751
+  未燒錄、開啟實體COM或操作機構；以上是主機/HTTP/編譯驗證。
+  @1 hello可核對上述revision與硬體清單，辨識實機是否載入此版本。
+
+以下皆為歷史驗證紀錄，其開機與硬體設定不代表目前版本。
+
+Startup acknowledgement diagnosis and retry verification: 2026-10-11 (Asia/Taipei)
+  Actual user Serial notice: "MKS startup acknowledgement failed".
+  This confirms initialization failed before 0x91; the old generic notice
+  cannot identify the failed ID, command or distinguish rejection from timeout.
+  User reports all three MKS driver panels are configured for 1 Mbps.
+  Hardware CAN traffic, wiring and driver configuration have not been measured.
+
+  STARTUP_RETURN_ZERO remains true. Only idempotent startup settings 0x8C/0xF3
+  retry every 500 ms while awaiting ACK, up to a fixed 10000 ms per setting.
+  Retries do not extend that deadline. Explicit ACK 0 stops immediately.
+  All three axes must confirm setup before any 0x91; motion 0x91/0xFE is not
+  retransmitted after successful enqueue and needs start/completion feedback.
+  Fault/notice identifies the ID and command. Status adds firmware identity,
+  revision startup-home-retry-v1, startup phase/node/command/attempts, and
+  position-known bits (bit0=ID4, bit1=ID5, bit2=ID6).
+
+  Regression RED: original source faults after the first lost 8C ACK.
+  Regression GREEN: a delayed 8C ACK recovers and all axes home; permanently
+  missing ACK, explicit rejection, malformed replies, STOP, deadline wrap,
+  blocked CAN queue and homing start/completion timeouts remain protected.
+  Actual full suite PASS: 95 C++ cases (47 mechanism, 36 chassis/RC, 12 system),
+  32 Python tests (11 generator, 21 Web), Node frontend and actual wire JSON.
+  Whole-loop test verifies ODrive and RC updates continue during startup retries.
+  STARTUP_RETURN_ZERO guard also verified in an isolated copied false config:
+  setup ACKs lead to Ready with no 91/FE, mask0 and no idle timeout; manual
+  stage4 HOME then stage3 HOME produce 91 and establish mask7. Actual default
+  stays true. The full suite and both actual board builds passed again afterward.
+  Actual teensy40 and teensy41 PlatformIO builds SUCCESS; zero warning/error/
+  fatal/FAILED matches in saved logs. Four generated YAML headers unchanged.
+  teensy40 firmware.hex: 481097 bytes
+    SHA256 63F0968DC18C4D9D5BFA9CE3D9EEFB54B0CC3994B698E9BBF3AFC3ADF9E0A11E
+  teensy41 firmware.hex: 483977 bytes
+    SHA256 78E9C74E82BF2EB29EE6038F36F5DB198CE33CF500E1532F6629A3331723E519
+  No upload, serial-port opening, motor command or physical hardware operation.
+  Read-only Windows enumeration reported a USB serial device at COM14.
+
+Earlier verification records follow:
+
+Startup automatic homing restored and verified: 2026-10-11 (Asia/Taipei)
+  STARTUP_RETURN_ZERO = true. Startup confirms 0x8C, enables with 0xF3,
+  then sends 0x91 to MKS ID 4, 5 and 6. Ready waits for all axes to finish.
+  The previous no-homing change was reverted to its verified original files.
+  Actual project host tests: 80 C++ cases and 32 Python tests PASS;
+  Node frontend and wire JSON checks PASS.
+  Actual PlatformIO builds: teensy40 and teensy41 SUCCESS;
+  saved build logs contain zero warnings/errors/fatal errors/FAILED.
+  teensy40 firmware.hex: 475337 bytes
+    SHA256 19EAB22C022B84B1D8C180C11E0F18B2B9BE983B2113D078A30017477774898A
+  teensy41 firmware.hex: 481097 bytes
+    SHA256 CCBC4A170A1E16A79D1223B78DE622B5883455C5B91C2B3CDE2EB35D14C522C7
+  No firmware upload, COM connection or physical hardware operation.
+
+Historical verification record (2026-10-10) follows:
+
+全車整合驗證（2026-10-10，Asia/Taipei）
+
+交付與實際驗證專案
+  C:\Users\User\OneDrive\桌面\TDK30th\restart\30th_TDK_Program_ByKomei\Robot_Integrated_Control
+  最終主機測試、Teensy 4.0／4.1 編譯均從此實際中文路徑執行。
+  未使用 RuntimeProjectPath 或 STAGE4_RUNTIME_PROJECT 覆寫。
+  依使用者確認，不配置遙控 STOP 通道；Web／USB STOP 與故障停止流程保留。
+  第二關目前為無動作佔位範本，未宣稱完成其競賽機構動作。
+
+完整主機驗證：全部通過
+  test/run_tests.ps1 執行 80 個 C++ 案例，MSVC C++17 /W4 /WX：
+    33 個機構案例：四關流程、PREV 與多次循環回溯、雙軸完成屏障、第三關停放／切換、
+      四關 RAM 設定保留、交易與平行動作驗證、錯序／逾時回覆、CAN 部分送出失敗與停止重試。
+    36 個底盤／RC 案例：四輪運動計算、15 ms 排程、心跳與 closed-loop 狀態、
+      失聯／Fault 處理、RC 對中與重新連線、按鍵消抖、關卡記憶、忙碌與 Debug／上傳互鎖。
+    11 個完整系統案例：實際 production 模組的共用 CAN 路由、漸變與底盤併發、
+      USB 輸出背壓、串口 STOP、Web／RC 互鎖、持續 RAM 設定、signed 24-bit、
+      串口溢位、MKS Fault 與行進期間心跳逾時對全車的停止。
+  11 個 YAML 產生器 Python 方法、21 個 Web／HTTP Python 方法：全部通過。
+  Node 前端回歸：四關編輯、PREV、停放切關、底盤／RC 狀態、三顆獨立伺服滑桿、
+    循環資料、角度／脈寬同步與模式／過期狀態互鎖通過。
+  真實串口格式 JSON fixture 解析通過：四關、MKS ID 4／5／6、512 動作容量、
+    16 個 RC 通道、ODrive 10／11 on CAN1 與 12／13 on CAN2、PREV／STOP 欄位。
+  測試紀錄：.pio/logs/host-tests.log。
+
+實際 Web 啟動檢查：通過
+  由交付專案的 tools/start_web_gui.ps1 自動選用現有 Python，以隱藏程序啟動：
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/start_web_gui.ps1 -Port 50492 -BindAddress 127.0.0.1
+  GET /、/app.js、/style.css 均回覆 200；關卡下拉選單包含 1／2／3／4。
+  四個 /api/init?profile=1..4 均回覆 200，段數依序為 4／1／4／6，repeat_from 為 1／1／2／1。
+  /api/state 回報 connected=false、firmware=null；實際啟動檢查未呼叫 connect／command／apply。
+  測試結束後已停止該次啟動器與 Python 伺服器，確認 TCP 50492 關閉。
+  HTTP 檢查報告：.pio/logs/web-gui-smoke.json。
+
+實際 PlatformIO 編譯：全部成功，兩份編譯紀錄的 warning/error/fatal/FAILED 診斷為 0
+  執行命令：
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/run_tests.ps1
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/compile.ps1 -Board teensy40
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/compile.ps1 -Board teensy41
+  平台 Teensy 6.0.0；Arduino framework 1.162.0；GCC 15.2.1；AlfredoCRSF 2.4.0。
+  本專案來源啟用 -Wall -Wextra -Werror；既有 FlexCAN_T4 標頭以 -isystem 處理。
+  產生器明確使用 MechanismConfig::helper，避免 Arduino delay 的名稱衝突。
+  Teensy 4.0：
+    FLASH code 74,720 / data 85,960 / headers 8,276 bytes。
+    RAM1 variables 137,568 / code 72,984 / padding 25,320 bytes；local variables 可用 288,416 bytes。
+    RAM2 variables 12,416 bytes；malloc/new 可用 511,872 bytes。
+  Teensy 4.1：
+    FLASH code 75,808 / data 86,984 / headers 8,212 bytes。
+    RAM1 variables 138,592 / code 73,240 / padding 25,064 bytes；local variables 可用 287,392 bytes。
+    RAM2 variables 12,416 bytes；malloc/new 可用 511,872 bytes。
+  每個板子都已確認 stage1／stage2／stage3／stage4 四份 generated headers 存在。
+  編譯紀錄：.pio/logs/teensy40.log、.pio/logs/teensy41.log。
+
+最終實際產物與 SHA256
+  .pio/build/teensy40/firmware.elf（230,584 bytes）
+    AF27089D3EBA7C0F3BD5A5E522FDA31D42D46D32121E0CAE9247AA473D45B7B0
+  .pio/build/teensy40/firmware.hex（475,337 bytes）
+    19EAB22C022B84B1D8C180C11E0F18B2B9BE983B2113D078A30017477774898A
+  .pio/build/teensy41/firmware.elf（233,216 bytes）
+    B98A3031EFA01AE4200965B2FF53CD2623303D38165D47F9DB634F088B2AA50F
+  .pio/build/teensy41/firmware.hex（481,097 bytes）
+    CCBC4A170A1E16A79D1223B78DE622B5883455C5B91C2B3CDE2EB35D14C522C7
+
+Windows 執行環境
+  本次重用既有 portable Python、venv site-packages、PlatformIO 與離線複製的 PyYAML；
+  AlfredoCRSF 亦由原專案複製，未安裝新相依套件。
+  pio.ps1 重用以套件 manifest 雜湊區分版本的 ASCII TEMP 套件快取，
+  並以必要的專案 junction 避免 GCC 中文路徑問題；未改動原工具鏈或全域環境設定。
+  ExecutionPolicy Bypass 只作用於上述 PowerShell 子程序，未修改系統執行原則。
+
+驗證範圍
+  未 Upload 韌體、未開啟實體 COM Port、未發送實機 CAN／馬達／伺服動作。
+  主機回歸使用實際控制器程式與硬體模擬，前端使用 DOM 模擬；未做瀏覽器視覺驗證。
+  HM 尋零、馬達方向、機構行程、PWM、實體急停與實機 15 ms 排程負載尚未在此環境驗證。
+
+2026-10-14 Auto Stage Home（Robot_Integrated_Control）
+  韌體識別：selective-home-stage3-imu-current-all-yaw-rc-stagehome-v1。
+  每次實際切入新關卡，以Job::Home執行既有HOME計畫並立刻清零step/completed/progress。
+  第1/4關：ID6使用91尋零，Pin2=1150us、Pin5=2100us。
+  第2關：ID7使用91尋零，Pin4=2000us、Pin6=1400us、Pin9=1800us。
+  第3關：ID4/5只使用FE回開機0/0，Pin3=2250us，嚴禁91。
+  第3關切出先完成PARK3=-2000/+2000，再啟動目的關卡HOME；雙軸均需完成回報。
+  切关HOME的公開phase為home_wait，STEP0；完成回報後ready，NEXT才開始STEP1。
+  HOME期間保留最新選關請求，當次HOME完成後接續；同關重選不重送HOME。
+  歸零後重新captureEntry，PREV回復歸零完成時的基線，不回切關前其他關的姿態。
+  RAM commit後啟動該關HOME；Web確認新表交換即回傳home_wait/ready，不把交換當成物理歸零完成。
+  底盤／RC／CAN／main／IMU來源及4份使用者現行YAML均保留；Pin9待機明確更新1800us。
+  舊回歸預期改為依現行YAML與底盤調參驗證，保留方向、屏障、限速、ACK期限及STOP檢查。
+  主機驗證：test/run_tests.ps1全PASS（242 C++：110機構、74底盤RC、39整車、19 IMU；
+            46 Python：11 YAML、35 Web/HTTP；Node前端、嚴格JSON與有限值檢查均PASS）。
+  實際整車模擬：HOME7及HOME6分別等待500ms，CAN速度指令持續每15ms發送、RC持續更新。
+  編譯：tools/compile.ps1 -Board teensy40／teensy41皆SUCCESS；Wall/Wextra/Werror，0警告0錯誤。
+  本機PowerShell需以-NoProfile -ExecutionPolicy Bypass -File執行既有ps1，未修改系統政策。
+  尚未燒錄硬體或執行實車歸零測試；實際尋零速度與方向仍依MKS HM參數。
+
+2026-10-14 切關改為「舊關復位／停放完成 → 新關Ready」（取代上一筆切入HOME）
+  韌體識別：selective-home-stage3-imu-current-all-yaw-rc-stagereset-v2。
+  舊關activeStage保持到回程完成，pending_stage保留最後選擇；進入目的關只擷取實際基線並重設STEP0。
+  第1/4關切出：ID6以FE回0，Pin2=1150、Pin5=2100；第2關切出：ID7以FE回0、Pin4/6/9回配置待機。
+  第3關依使用者明確選擇保留PARK3：ID4=-2000、ID5=+2000，320RPM/ACC2，Pin3=2250us。
+  新入任一關卡都不發HOME／STEP1；再入第三關保留Park，PREV回實際Entry（初次開機Entry為0）。
+  回程Job::SwitchReturn公開phase=return_wait；STEP0，需等待所有步進及伺服指令屏障完成才切換至ready。
+  普通動作中也接受選關，先完成當前整段再復位；RUN不繼續下一段。回程不可被重複選關重送，選回舊關也完整完成。
+  回程mask包含舊關標準組＋現行YAML/RAM表所有使用致動器；自訂額外步進回FE0、額外伺服回配置待機。
+  切關不發91；STARTUP/HOME/DebugGoHome仍僅允許ID6/7使用91。ID4/5永不91。
+  手動HOME3仍FE0；若同時請求切出，先完成HOME3再PARK3，完成後直接進目的關ready。
+  RAMcommit含同關重設都先復位舊表使用機構，再安裝新表並ready；abort保留舊表，已接受回程仍完成。
+  Web apply需ready＋新version＋目的stage＋runtime＋非uploading＋STEP0／completed0，return_wait不能冒充套用完成。
+  主機整套PASS：248 C++（115機構、74底盤RC、40整車、19 IMU），51 Python（11 YAML、40 Web/HTTP），Node前端與實際JSON均PASS。
+  受測案例驗回程時15ms CAN速度發送與RC讀取持續，STOP撤銷待切關，返回首次STEP1與跨關RAM致動器union。
+  Teensy40／Teensy41 compile.ps1皆SUCCESS；Wall/Wextra/Werror下0警告0錯誤，編譯日誌留於.pio/logs。
+  保留system_config與機構配置、4份YAML、底盤、RC、CAN、main、IMU及上一輪調參測試內容。
+  未燒錄、未開啟COM、未發實車CAN指令；實車運動／待機到位尚未驗證。
+
+2026-10-14 Stage orientation mapping (Robot_Integrated_Control)
+  Firmware revision: selective-home-stage3-imu-current-all-yaw-rc-stagereset-orient-v3.
+  Normalize each original RC axis using its own calibration/deadzone before mapping.
+  Stage 1 swaps normalized forward/strafe: forward -> chassis right, right -> chassis forward.
+  Stage 2 reverses forward only; strafe stays unchanged. Stages 3/4 keep the original frame.
+  Default stage 4 and unknown stages retain the original frame; body rotation and yaw signs remain unchanged.
+  The 15 ms velocity path uses MechanismController::status().stage (committed active stage).
+  Pending selections retain the outgoing frame until the current STEP and return/park finish.
+  No added delay, neutral wait, velocity send, yaw reset, or main/IMU/mechanism modification.
+  Existing YAML, servo/current settings, joystick/yaw tuning and switch-return behavior were preserved.
+  Stale Stage 2 test assumptions were updated for the current user's parallel, sequential,
+  ramp and delay YAML plus cumulative state/actual recorded PREV history; YAML itself was unchanged.
+  Full host suite PASS: 269 C++ (115 mechanism, 87 chassis/RC, 48 system, 19 IMU),
+  51 Python (11 generator, 40 Web/HTTP), Node frontend and strict real-wire JSON checks.
+  21 added orientation cases cover cardinal/diagonal/mixed vectors, calibration, deadzones,
+  rotation, yaw budget, active versus pending selection, return/park barriers and actual 15 ms CAN output.
+  Both tools/compile.ps1 builds SUCCESS: teensy40 and teensy41, zero warning/error diagnostics.
+  Project source flags remain -Wall -Wextra -Werror. PowerShell Bypass was process-scoped only.
+  teensy40 firmware.hex: 507017 bytes
+    SHA256 FF61F350B01782FBC016FB7443826379F6F881ED270A3DDE28D7AB1923B6B38F
+  teensy41 firmware.hex: 512777 bytes
+    SHA256 99B16FA8F7820F3B7EDCFDBC35031516C5AD82EA2037AB2ADF444845780FDE06
+  Build/test logs: .pio/logs/teensy40.log, teensy41.log and host-tests.log.
+  No upload, COM connection, physical CAN command or real-vehicle validation was performed.
+
+2026-10-14 Rigid stage rotations and stage-3 zero return (Robot_Integrated_Control)
+  Firmware revision: selective-home-stage3-imu-current-all-yaw-rc-rotation-park0-v4.
+  Stage 1 now rotates normalized translation by +90 degrees: (vx,vy)=(-S,F).
+  Stage 2 uses 180 degrees: (vx,vy)=(-F,-S). Stages 3/4, body rotate and yaw remain unchanged.
+  Each RC axis is calibrated before mapping. Active stage changes only after the outgoing return finishes.
+  PARK3 now uses FE ID4=0/ID5=0, 320 RPM, ACC0 and Pin3=2250; never 91 for ID4/5.
+  The existing nonblocking return queue waits for every moving axis before handing off to Ready/STEP0.
+  Known axes already at zero skip redundant FE motion; manual HOME3 followed by selection also completes.
+  Existing RC stage events remain accepted during normal STEP/Home/return with the latest destination retained.
+  NEXT is available after Ready and a fresh released/pressed button; the incoming stage does not auto-HOME.
+  SERVO_START_US is exactly {1150,2250,2000,2100,1400,1100} for pins {2,3,4,5,6,9}.
+  All four YAML files are byte-identical to the pre-change backup; latest stage2/stage3 headers regenerated.
+  Both board builds have generated headers matching compile_document(current YAML) for every stage.
+  GUI stage-3 new parallel template and return hint use 0/0 standby, and current docs describe the new mapping.
+  Full host suite PASS: 274 C++ scenarios {'mechanism_regression': 117, 'chassis_rc_regression': 87, 'system_regression': 51, 'imu_regression': 19}.
+  Python suite PASS: 11 tests.
+  Python suite PASS: 41 tests.
+  Node frontend and strict finite yaw/current wire JSON verification PASS.
+  Both tools/compile.ps1 -Board teensy40 and teensy41 SUCCESS: zero warning/error diagnostics.
+  Project flags remain -Wall -Wextra -Werror. PowerShell Bypass was process-scoped only.
+  teensy40 firmware.hex: 507017 bytes
+    SHA256 71F2BEFFC720FD34919326298E7A0802207937002183BA801A747D53E59F34DB
+  teensy41 firmware.hex: 512777 bytes
+    SHA256 B518CCF229CADD84597D0E7C420C14E8EEF8A1490F363203001C3550D2EDEA16
+  Logs: .pio/logs/host-tests.log, teensy40.log and teensy41.log.
+  No flashing, COM connection, physical CAN command or real-vehicle validation was performed.
+
+2026-10-14 Exact Stage2 YAML values and locked standby (Robot_Integrated_Control)
+  Attachment requirements verified against existing rigid stage rotations and third-stage Park0.
+  Stage2 STEP1: ID7=-330000, 3000 RPM/ACC0; Pin9=1800, Pin4=1300.
+  Stage2 STEP2: Pin9=1000 and Pin4=2100. STEP3 remains ID7=4000, 320 RPM/ACC5.
+  Stage2 STEP4 remains Pin6=600 over 1000 ms, then waits 5000 ms; repeat_from=2.
+  Only the three requested Stage2 YAML values changed. Stage3 YAML was byte-preserved.
+  Stage3 verified: paired +/-7100 at 3000 RPM, 0/0 at 50 RPM, Pin3=1630/1700/1620.
+  SERVO_START_US remains exactly {1150,2250,2000,2100,1400,1100}; added static_assert
+  prevents inadvertent changes to these six standby pulses while STEP pulses remain editable.
+  Existing stage1(-S,F)/stage2(-F,-S) direction mapping and PARK3 FE0/0,320RPM/ACC0 remain verified.
+  Core controllers, RC, IMU, chassis math, hardware tuning and safety source were not rewritten.
+  Exact Stage2 YAML/RAM/generated C++ regression and frontend fixture updated.
+  Full test/run_tests.ps1 PASS: 274 C++ (117 mechanism,87 chassis/RC,51 system,19 IMU),
+  53 Python (12 YAML,41 Web/HTTP), Node frontend and strict wire JSON checks.
+  Both compile.ps1 teensy40/teensy41 SUCCESS; zero warning/error diagnostics under -Wall -Wextra -Werror.
+  All four generated headers in each board build match compile_document(current YAML).
+  teensy40 firmware.hex: 507017 bytes
+    SHA256 684C6D6FD81717A88312315F68927FEAF7AC73762812759BA4A9C588870FD38A
+  teensy41 firmware.hex: 512777 bytes
+    SHA256 4D57B19F4DF5BD2A1C0CEC9736C169D61F4B63170197BC2BC963705F9E31E7FE
+  No flashing, physical CAN command, COM connection or real-vehicle test was performed.
+
+2026-10-14 Stage1 five props, CH7 modes and Stage5 (Robot_Integrated_Control)
+  Firmware revision: stage1-props-five-stages-v5.
+  User-confirmed CH7 LOW exit destination is fixed stage 4 unless a later normal selection retargets it.
+  CH7 HIGH >1700 enters stage1; LOW <1300 exits; MID1300..1700 retains the prior context.
+  HIGH: CH10..14 trigger basket/vase/tube/chicken/bird (1/3/2/2/2 steps), directly starting STEP1.
+  LOW/general: CH10..13 select stages2/3/4/5. CH5 PREV, CH6 NEXT, CH9 clear and driving axes unchanged.
+  Stage1 terminal NEXT is refused; a fresh prop trigger restarts STEP1, and PREV retains actual entry history.
+  Props pressed while busy are consumed without replay; context changes require releasing held shared switches.
+  Exit waits for the current entire STEP, then ID6 physical91 and Pin2/5=1150/2100 standby.
+  A late LOW after accepted FE completes FE before91; queued/inflight manualHOME is used without duplicate91.
+  Ordinary stage returns remain FE, stage3 remains FE4/5=0/0 and never91; stage5 default HOME/STEP touches no hardware.
+  Five new stage1_<prop>.yaml and stage5_steps.yaml; old stage1_steps.yaml is a vase3-step compatibility table.
+  Nine independent RAM profiles plus one staging bank retain stage+prop identity across select/commit/abort.
+  USB stage <stage> [prop], prop <1..5>, stage1.exit [2..5] and plan.begin optional prop are supported.
+  Status includes prop/pending_prop/prop_complete and RC context/prop/raw three-position switch.
+  Web nine-profile editing, file hash guards, immediateRAM barriers and STEP1 trigger use matching identity.
+  All ten generated board headers match current YAML; saved YAML plus Build/Upload sets startup defaults.
+  Existing stage2/3/4 YAML, startup/current/hardware/standby settings, main/CAN/IMU/chassis and safety sources preserved.
+  A broad core write was initially rejected by automatic review; the exact diff was inspected against
+  the attachment and explicit LOW destination reply, and a baseline-checked three-source write was approved.
+  No rejected write was executed. No firmware upload or physical actuator command occurred.
+  Full test/run_tests.ps1 PASS: 326 C++ (152 mechanism,94 chassis/RC,61 system,19 IMU),
+  66 Python (16 generator,50 Web/HTTP), Node nine-profile DOM and strict real-wire JSON.
+  Both compile.ps1 teensy40/teensy41 SUCCESS, -Wall -Wextra -Werror, zero warning/error diagnostics.
+  Formatting preservation audit passed. RC LF restoration changes no source tokens from the tested program.
+  Actual start_web_gui.ps1 localhost50619 launched; all nine /api/init profiles returned HTTP200 with
+  stage/prop/steps 1/1/1,1/2/3,1/3/2,1/4/2,1/5/2,2/0/4,3/0/4,4/0/6,5/0/1.
+  /,app.js,style.css returned200; state connected=false/firmware=null. No connect/command/apply POST.
+  The temporary server was identified by its command line and stopped after verification.
+  teensy40 firmware.hex: 717274 bytes
+    SHA256 DDC41A1970F3D489185368FC16DF7C30EEEC5F4458C2B9B9FE343CDD8452674F
+  teensy41 firmware.hex: 723034 bytes
+    SHA256 7DFEC5684FE03811E966CDE2727AB0F7F25D76CFEDD0E931114F0E896F887C10
+  No upload, COM connection or real-vehicle validation was performed.
+
+2026-10-14 XY-160D Stage2 cylinder migration (Robot_Integrated_Control)
+  Firmware revision: cylinder-stage2-v6. MKS list is {4,5,6}; only ID6 homes with91.
+  Current startup settings remain 4/5=3000mA and 6=5200mA; ID7 has no handshake/current/home/debug/stop CAN output.
+  ID4/5 stationary92 zero and FE movement preserved; six standby PWM values remain exactly
+  {1150,2250,2000,2100,1400,1100} on pins{2,3,4,5,6,9}.
+  Added cylinder_types and independent cylinder_controller. IN1=14,IN2=15;
+  Extend=HIGH/LOW,Retract=LOW/HIGH,Stop=LOW/LOW, never HIGH/HIGH.
+  Startup establishes LOW output latches before OUTPUT; no cylinder startup movement.
+  All new motion waits nonblocking50ms LOW/LOW, then gets the full requested runtime from actual energizing.
+  Stop/fail/accepted profile switch cancels output immediately, including CAN-stop retry/USB backpressure cases.
+  Only active or queued cylinder plans discard unissued outgoing actions; pure MKS/servo complete-STEP
+  and pending-selection cancellation behavior, Stage1 LOW91 dedup, RC/chassis/IMU tuning and main remain preserved.
+  Stage2 incoming HOME2: retract5000ms and PWM4/6/9=2000/1400/1100, home_wait/STEP0 until Ready.
+  Stage2 outgoing/manualHOME uses the same safe retraction, never ID7 91.
+  Stage2 YAML: Extend6000 parallel9=1800/4=1300;9=1000/4=2100;Retract6000;
+  PWM6=600 over1000ms thenDelay5000;repeat_from2. Safe switch stops first then may retract on return.
+  Cylinder PREV uses prior completed timed reference and reruns6000ms; unknown/interrupted reference stops.
+  No internal microswitch/position feedback is read. Timer completion is a command estimate.
+  Physical emergency stop has no MCU input; external power cut is preserved, not claimed as a sensed GPIO event.
+  Cylinder action kind4 appends enum0/1/2 to the RAM action (11 fields); old kinds retain10 fields.
+  Debug cylinder numeric action/ms, GPIO/remaining/reference JSON, YAML schema and generation updated.
+  Web editor supports ordinary/parallel Cylinder actions, milliseconds/seconds, Debug Extend/Retract/localStop.
+  GlobalSTOP and Debug localStop bypass operation lock; independent localStop leaves other axes running.
+  RAM apply waits up to60s for Ready0/newversion/stage+prop and incoming Stage2 retraction.
+  Concurrent apply-entryHOME/globalSTOP, rejection, duplicates, bounds and nine RAM profiles are covered.
+  Full test/run_tests.ps1 PASS: 356 C++ (175 mechanism,94 chassis/RC,68 system,19 IMU),
+  73 Python (19 generator,54 Web/HTTP), Node frontend and strict real-wire JSON checks.
+  Native /W4 /WX and both compile.ps1 teensy40/teensy41 -Wall -Wextra -Werror passed with zero diagnostics.
+  Ten generated headers for each board exactly match current YAML; all source newline/BOM styles preserved.
+  Stage1 five props,Stage3,Stage5 and protected main/RC/chassis/IMU/CAN/safety sources byte-preserved.
+  During work, Stage4 STEP1 position changed externally from -600 to -700; retained latest -700,
+  not overwritten, and generated/tests/builds use this latest current file.
+  Actual start_web_gui.ps1 localhost50443: all9 profiles and/,app.js,style.css returned HTTP200;
+  Stage2 document has4 steps with Extend/Retract6000. State connected=false/firmware=null.
+  Only GET requests; temporary server process command lines verified before stopping; no COM connection.
+  teensy40 firmware.hex: 725914 bytes
+    SHA256 1423C6327AF23EA70DDAE58D9FB926C9ADE5E35BB2252828F3D0B156627BB075
+  teensy41 firmware.hex: 728794 bytes
+    SHA256 2350A28EC803C8A4DB4DDAAAED66D07EC0597771BD98AE60CBEA82E9E4712F77
+  Logs: .pio/logs/host-tests.log,teensy40.log,teensy41.log; no upload or real-vehicle validation.
+
+2026-10-14 Bench Test Mode (Robot_Integrated_Control)
+  Firmware revision: bench-test-v7; production default SystemConfig::BENCH_TEST_MODE=true.
+  Bench RC mechanism controls require linked/valid RC and no global STOP, but not ODrive Running/healthy/state8.
+  Chassis itself retains original 15ms/500ms/heartbeat/arming/error safety, orientation and yaw settings.
+  Separate MotorAxis online/offline flags from active (active remains in-flight motion).
+  Missing startup8C/83/F3/92 ACK after10s or500ms CAN-enqueue timeout warns and skips only that axis;
+  no global STOP, no fabricated FE reference, no following initialization/home for offline axes.
+  Startup ID6 91 without first ACK waits10s, best-effort F7/F3disable only that axis, then skips;
+  startup91 never enqueued at500ms also skips, without sending localstop for unsent movement.
+  ACK0/rejected movement/started-home missing completion/runtime missing feedback/servo failures
+  retain real faults and global STOP. Late replies never rejoin skipped axes until restart.
+  STEP/PREV/HOME/return skip offline or unknown-reference axes; Debug safely rejects their FE.
+  Explicit GoHome remains possible for online, unreferenced ID6; never91 for ID4/5.
+  Skipped offline ID6 CH7 LOW exit satisfies the return barrier instead of endlessly scheduling HOME.
+  Cylinder driver, Stage2 incoming/outgoing HOME2, timed NEXT/PREV,50ms deadtime and GPIO STOP remain unchanged.
+  GPIO/PWM connection presence is not sensed; only MKS ACK availability is discovered.
+  Serial bench_test_mode/motor_online_mask/motor_offline_mask and existing position_known_mask
+  use ID4/5/6 bit0/1/2; online is startup confirmation, not continuous MKS heartbeat monitoring.
+  Web Bench badge and individual boot/offline/unreferenced/pending state; chassis LOCKED shown separately.
+  Optional-mask Debug safeguards in frontend/backend; offline axes in YAML/RAM remain accepted for firmware skip.
+  Entire original356 C++ scenarios compiled in strict mode macro0, new34 scenarios in bench macro1,
+  plus one no-override production-default smoke. Both branches compiled with MSVC /W4 /WX zero diagnostics.
+  Full test/run_tests.ps1 PASS: 391 C++ (175 mechanism,94 chassis/RC,68 system,19 IMU,34 Bench,1 default),
+  79 Python (19 YAML,60 Web/HTTP), Node frontend and strict real-wire JSON checks.
+  An initial full run found two stale v6 version assertions in system_regression; updated only to v7,
+  then reran the full suite successfully. No behavior assertion was relaxed.
+  All 10 YAML source files, generator, standby PWM/current/Cylinder parameters, chassis/CAN/IMU/main/global-safety
+  sources byte-preserved. Original source newline/BOM styles preserved in all changed existing files.
+  Ten generated headers per board exactly match current YAML. Both compile.ps1 boards passed
+  with -Wall -Wextra -Werror and zero warning/error diagnostics.
+  Actual start_web_gui.ps1 localhost64730: all9 profile endpoints and/,app.js,style.css HTTP200;
+  connected=false/firmware=null, only GETs, temporary process verified and stopped after smoke.
+  teensy40 firmware.hex: 728794 bytes
+    SHA256 6651BC80575E49ED1CE0F7E9044082E978C1187CA5CA8C111D83D014CA78A1F3
+  teensy41 firmware.hex: 731674 bytes
+    SHA256 9483E37AD8DDD40BBAA96940B4130DCEBCAF630470912E05E610862709FB076E
+  Logs: .pio/logs/host-tests.log,teensy40.log,teensy41.log; no upload/COM connection/real-vehicle test.
+
+2026-10-14 Stage1 basket/chicken/bird lift and release completion
+  Firmware identity remains bench-test-v7; no controller/config/RC/Bench policy changes.
+  Basket2steps: original positioning preserved, NEXT adds FE ID6=6000 RPM500 ACC150,
+  retaining Pin2=1611 and Pin5=2056. Terminal NEXT refused only after STEP2 completes.
+  Chicken/Bird4steps: original positioning and grip1111/1056 preserved;
+  STEP3 only FE ID6=4000 RPM1500 ACC255, holding grip; a separate NEXT releases
+  Pin2=1667 in STEP4 (500+(105/180)*2000 rounded). Release was not merged into parallel.
+  Updated exact generator, one-shot totals2/3/2/4/4, actual entry/retrigger/PREV,
+  busy NEXT consumed without replay, RC progress and actual bird wire JSON completed4/position4000/pulse1667.
+  Added requested include/stage1_basket.generated.h,stage1_chicken.generated.h,stage1_bird.generated.h.
+  PlatformIO pre-build and host runner regenerate all3 include snapshots from validated YAML;
+  board-generated counterparts also match. This prevents stale include lookup after later YAML editing.
+  All controller/config/GUI production sources and seven other YAML files byte-preserved;
+  prior steps in the edited3 YAMLs preserved exactly as parsed documents. Source newline/BOM styles retained.
+  Full test/run_tests.ps1 PASS:396 C++ (177 mechanism,94 chassis/RC,70 system,19 IMU,35 Bench,1 default),
+  80 Python(19 YAML,61 Web/HTTP), Node frontend and strict actual-wire JSON checks.
+  Full suite verified both strict/Bench flags, nine independent RAM profiles and unchanged safety protections.
+  compile.ps1 teensy40/teensy41 SUCCESS with -Wall -Wextra -Werror, zero warning/error diagnostics.
+  teensy40 firmware.hex:728794 bytes
+    SHA256 5340004D3BB32156EA46EDFE789C5656A41CFD22EF16E4F5E23AACD259558751
+  teensy41 firmware.hex:731674 bytes
+    SHA256 E4DFC9C9DCDA6A07BFDEB19DFB9D1C783ACFB29D7C6E20E624D870066731B827
+  Logs:.pio/logs/host-tests.log,teensy40.log,teensy41.log. No upload/physicalCAN/COM/real-vehicle test.
+
+2026-10-14 Chassis90 + IMU25 <=115 and independent Pin14 breathing PWM
+  Firmware identity remains bench-test-v7. Chassis JOYSTICK_MAX_SPEED=90, SAFETY_MAX_SPEED=115;
+  MAX_CORRECTION=25 retained with KP3.5, CORRECTION_SIGN=-1, LOCK_DELAY_MS200.
+  Joystick normalization precedes yaw addition and final per-wheel clamp; ODrive local vel_limit is not changed.
+  Cylinder IN1/IN2 migrated14/15 to16/17. Pin14 reserved for breathing PWM with compile-time bus/actuator collision checks.
+  New pwm_controller.h/.cpp: begin resets0 and rising direction, analogWriteResolution8,
+  poll makes one bounded update after5ms, 0..255 endpoint reversal, uint32 millis-wrap-safe timing, no delay/catch-up waits.
+  Actual main setup/loop begin/poll start PWM before MKS startup completion; independent breathing continues after global STOP.
+  STOP retains immediate Cylinder16/17 LOW/LOW, MKS disable, six-servo detach and ODrive lock/zero safety.
+  Dedicated7 PWM cases verify0 startup, interval, full two-cycle sweep, late-poll no burst, re-begin, wrap and Cylinder independence.
+  Added3 actual-main-loop integration cases (startup, active Cylinder with15ms chassis, global STOP) and1 disconnected Bench case;
+  explicit90+25=115 scenario plus all existing yaw/orientation/link/bus/safety regressions passed.
+  Full test/run_tests.ps1 PASS:408 C++ (177 mechanism,95 chassis/RC,73 system,19 IMU,36 Bench,7 PWM,1 default),
+  80 Python (19 YAML,61 Web/HTTP), Node frontend and strict actual-wire JSON checks.
+  First full run found a stale Flash Basket2 restoration assertion; changed only the test to current source step count,
+  preserving synthetic RAM counts and runtime behavior; complete suite rerun passed.
+  All10 YAML sources byte-identical to task-start backup, including pre-existing Basket3/Vase1000/Chicken8300-to2000 tuning.
+  Existing profile assertions updated to those source values without changing any YAML.
+  CAN/RC/IMU/Mechanism/Cylinder/chassis-math/global-safety source logic unchanged; fixed six-servo standby array preserved.
+  Web static XY-160D label and GPIO protocol fixtures updated16/17; frontend/backend behavior and serial schema unchanged.
+  All10 generated headers for each board and host plus three requested include snapshots exactly match current YAML.
+  Existing files retain original newline/BOM styles; docs reflect current wiring,90/25/115 and preserved local prop tuning.
+  compile.ps1 teensy40/teensy41 SUCCESS with -Wall -Wextra -Werror and zero warning/error diagnostics.
+  teensy40 firmware.hex:731674 bytes
+    SHA256 182E645FBE081B9E79FD7373B24244BC4B8F292294E34DA8FC9EE754224C4CAB
+  teensy41 firmware.hex:734554 bytes
+    SHA256 A44687CCE36447E04FD35C653129D1D3F677C32F719925840EC174FAA98380C7
+  Logs:.pio/logs/host-tests.log,teensy40.log,teensy41.log. No upload/COM connection/physical CAN/real-vehicle test.
+  REQUIRED before flashing: move XY-160D IN1 toPin16, IN2 toPin17; oldPin14 connection would receive PWM.
+  Pin14 is PWM rather than DAC; ideal8-bit command255 average is255/256 of3.3V (~3.287V), hardware voltage unmeasured.
+
+2026-10-15 Cylinder logical GPIO reversal and Pin14 brightness0..55
+  Firmware identity remains bench-test-v7. Logical Cylinder IN1_PIN=17, IN2_PIN=16.
+  Existing physical16/17 wiring is retained: software pin definitions provide the reversal; no second wire swap.
+  Extend drives17HIGH/16LOW; Retract drives17LOW/16HIGH; Stop makes bothLOW.
+  Driver50ms all-LOW deadtime, full timed duration after energizing and immediate global STOP are unchanged.
+  Pwm MAX_VALUE=55 with existing8-bit resolution,5ms single-step updates and nonblocking endpoint reversal;
+  ideal full breathing cycle110ticks/550ms, begin/reset/millis-wrap/late-poll bounded behavior preserved.
+  Both CYLINDER_TEST.ino and CYLINDER_TEST/CYLINDER_TEST.ino synchronized17/16,
+  direction Serial messages now derive from constants; both copies identical, other sketch behavior unchanged.
+  Web static label and status fixtures/assertions use logical17/16; actual status still derives from firmware config.
+  All10 YAML sources byte-identical to task-start backup; extend/retract names, durations and ordering not changed.
+  Source Stage2 already contained six steps at task start: servos9/4, servos9/4, Retract3000,
+  servo6 to550/1000ms,delay1000,servo6 to1400/1000ms; Extend3000; servos4/9parallel1000ms; repeat2.
+  Old source-dependent tests updated to that exact six-step file; synthetic RAM protocol fixtures retain independent coverage.
+  Explicit GPIO regressions verify HOME2 and STEP3 retract on16HIGH/17LOW, STEP5 extend on17HIGH/16LOW;
+  NEXT/PREV/run-once/cycle/selection/STOP/busy cases and isolated Bench operation pass with current source.
+  PWM regressions verify0..55 endpoints/timing, full cycles/reset/wrap/no-burst and independence from cylinderGPIO.
+  Actual main-loop concurrency retains15ms chassis cadence during timed cylinder/PWM; global STOP leaves breathing active.
+  Full test/run_tests.ps1 PASS:408 C++ (177 mechanism,95 chassis/RC,73 system,19 IMU,36 Bench,7 PWM,1 default),
+  80 Python (19 YAML,61 Web/HTTP), Node frontend and strict wire JSON compatibility checks.
+  Focused native checks identified one stale Stage3-to-Stage2 reference assertion (old STEP1 extension);
+  synchronized it to the unchanged new servo-only STEP1, then all focused and full suites passed.
+  Main/Mechanism/CylinderDriver/chassis/RC/CAN/IMU/global-safety logic, fixed standby pulses and90+25<=115 budget unchanged.
+  All30 host/two-board generated tables and three include snapshots exactly match current YAML.
+  Existing file newline/BOM styles preserved; current docs distinguish logical pins from fixed existing wiring.
+  compile.ps1 teensy40/teensy41 SUCCESS with -Wall -Wextra -Werror and zero warning/error diagnostics.
+  teensy40 firmware.hex:731674 bytes
+    SHA256 CFE1F25A1562EA346B047F9E0CA2F41B3192F7A9EDB10451A140119463662464
+  teensy41 firmware.hex:737434 bytes
+    SHA256 96B5FE0DED3739893704116C5FE5AF90E0807AB9C50C9402E220EE62BA2ED1A7
+  Logs:.pio/logs/host-tests.log,teensy40.log,teensy41.log. No upload/COM connection/physicalCAN/real-vehicle test.
+  Real motor direction, internal limit switches and Pin14 voltage/brightness remain to be checked on hardware.
+
+2026-10-15 Common GUI Pin14 brightness and breathing speed RAM controls
+  Firmware identity remains bench-test-v7; top-level pwm capability distinguishes supported firmware.
+  Boot defaults stay MAX_VALUE55, STEP_INTERVAL_MS5, Pin14,8-bit; configure accepts peak0..255 and interval1..1000ms.
+  New PwmController::Status/configure: invalid arguments nonmutating, same settings preserve phase,
+  any changed setting starts a full next interval, lower peak clamps output immediately,0 turns indicator off,
+  enabling from0 rises again, begin restores defaults; poll single-step bounded/nonblocking/millis-wrap-safe.
+  USB @req pwm.set <peak> <step_ms> strictly validates integers before changes; STOP stays ahead of output backpressure.
+  status/hello include pwm.available,pin,value,max_value,step_interval_ms,default_max_value/default_step_interval_ms,
+  min/max_step_interval_ms. Runtime values/config can be read without changing light or mechanism.
+  Largest numeric-state reply measured2817/3072bytes,255bytes headroom; USB_REPLY_BYTES remains3072.
+  Web Bridge validates JSON integers/ranges and connected/fresh4s/protocol1/Pin14 capability before pwm.set,
+  rechecks capability under existing operation lock, sends command, then returns refreshed actual firmware status.
+  Lighting is allowed during startup/moving/Normal/Debug/latchedSTOP; never resets SystemSafety or arms motors.
+  Existing STOP bypasses long bridge locks; old/absent capability, malformed payload, stale and disconnected cases reject.
+  Common GUI panel includes peak slider/number, interval slider/number (higher slower), recent output/current settings,
+  estimated full cycle2*peak*interval, off0, Apply and firmware-default Reset. Dragging only edits; Apply changes RAM.
+  Telemetry polls preserve dirty input; actual ACK status confirms settings. A late ACK after state disappearance
+  is guarded and retains pending settings until a fresh matching status; Node async regression passed.
+  Runtime settings are not written to YAML/config/EEPROM; reboot55/5. First use needs new firmware and GUI restart.
+  All10 YAML and all unrelated core/config hardware assignments byte-preserved; Cylinder17/16, six-servo standby,
+  Bench/CH7 prop/stage selection, MKS4/5/6 and90+25<=115 remain intact; main scheduling unchanged.
+  Added10 standalone PWM and6 actual-USB/system cases, including concurrent cylinder/chassis15ms and STOP independence.
+  Full test/run_tests.ps1 PASS:424 C++ (177 mechanism,95 chassis/RC,79 system,19 IMU,36 Bench,17 PWM,1 default),
+  91 Python (19 YAML,72 Web/HTTP), Node frontend and strict default/live/off/extreme wire JSON checks.
+  Both compile.ps1 boards SUCCESS with -Wall -Wextra -Werror and zero warning/error diagnostics.
+  All30 host/two-board generated headers and3 include snapshots match unchanged YAML; file newline/BOM styles preserved.
+  Actual start_web_gui.ps1 localhost51080 smoke:9 profile endpoints plus/,app.js,style.css HTTP200,
+  new PWM panel/controls/command/styles present, connected=false/firmware=null; only GETs and verified temporary process cleanup.
+  teensy40 firmware.hex:731674 bytes
+    SHA256 89E19FD1EFF71FD9365448E53E30E176108019D6FF0E528AE4E5A15BC2261756
+  teensy41 firmware.hex:737434 bytes
+    SHA256 B8A456D693E5093D7351C2FCFC93964F52D4CDD0D06308015AE14ABDEA4AA226
+  Logs:.pio/logs/host-tests.log,teensy40.log,teensy41.log and TEMP codex_pwm_gui_51080.stdout/stderr.log.
+  No upload/real COM connection/physicalCAN or brightness/voltage measurement. User may flash the built firmware once to enable GUI tuning.
+
+2026-10-15 Held RC stage selection, immediate chassis orientation and bounded safe return
+  Chassis direction uses the accepted pendingStage first, otherwise activeStage, on each15ms velocity tick.
+  Mechanical activeStage still waits for actual return completion; chassis.direction_stage reports the effective frame.
+  GUI shows the direction stage while its mechanism status remains return_wait with the old stage and pending target.
+  Stage1(-S,F), Stage2(-F,-S), Stage3/4/5(F,S), rotate/yaw correction,90+25<=115 budget and chassis interlocks unchanged.
+  CH7LOW general selectorsCH10..13 retain30ms debounce and1700/1600us hysteresis.
+  Latest stable LOW-to-HIGH wins among held selectors; releasing it falls back to the newest remaining held selector.
+  Unique stable HIGH at cold boot is adopted. Multiple boot-held HIGHs have no history and wait for a unique level/new press.
+  Accepted held selection is not replayed over later Web selection; startup/Debug/upload/chassis-lock rejection is retained
+  and retried when allowed. Invalid input does not create an action; recovered levels retain pending/history safely.
+  CH7HIGH five-prop mode/MID retained context, LOW exit defaultStage4 withID6HOME and shared-key release guard unchanged.
+  NEXT/PREV require Ready and a fresh release/press; blocked/busy navigation is not queued.
+  Automatic SwitchReturn/EntryHome skip only an inactive LOW/LOW cylinder with a completed timed Retract reference.
+  Unknown/interrupted/extended cylinder still retracts forHOME_RETRACT_MS5000; explicit manual HOME/Debug do not skip.
+  This reference is a timed estimate, not measured internal-limit feedback.
+  Retarget during SwitchStop/SwitchReturn/EntryHome changes pending only; existing FE/91 and cylinder clocks are not repeated.
+  SwitchStop/Return/EntryHome share one STAGE_RETURN_TIMEOUT_MS130000 guard; retarget cannot renew it.
+  Guard accommodates supported60s RAM servo +30s return +30s extraID6HOME +5s entry with enqueue margin;
+  existing start1500ms/completion30000ms/CAN-enqueue500ms deadlines remain earlier protection.
+  Deadline checked before cylinder poll prevents energizing on the expiry tick; expired return becomesFault/globalSTOP.
+  Failed/stopped unfinished MKS axes lose positionKnown; late ACK does not restore a confirmed position or pretendReady.
+  Cylinder remains digitalWrite on logicalIN1=17/IN2=16 only; Extend17HIGH/16LOW, Retract17LOW/16HIGH, StopLOW/LOW.
+  Pin14 PWM/GUI RAM brightness+speed module and boot55/5 unchanged; no analogWrite on16/17 or Wire1 initialization.
+  All10 YAML byte-identical to task-start backup; all30 generated host/board headers and3 include snapshots match sources.
+  Main/CAN/IMU/math/global-safety/CylinderDriver/Pwm logic and six-servo standby array remain byte-preserved.
+  system_config.h changes only the new overall deadline and its static assertion; existing file newline/BOM styles retained.
+  Full test/run_tests.ps1 PASS:471 C++ (194 mechanism,116 chassis/RC,86 system,19 IMU,38 Bench,17 PWM,1 default),
+  92 Python (19 YAML,73 Web/HTTP), Node frontend and strict actual-wire JSON checks.
+  Added17 mechanism,21 chassis/RC,7 system,2 Bench and1 Web scenarios.
+  Pending actual-loop fixture:stage2,pending1,return_wait,direction_stage1,cylinderRetract active;
+  four90turns/s wheels already use Stage1 translation while cylinder/MKS return barriers remain pending.
+  Largest tested numeric status fixture2821bytes remains within USB_REPLY_BYTES3072.
+  compile.ps1 teensy40/teensy41 SUCCESS with -Wall -Wextra -Werror and zero warning/error diagnostics.
+  teensy40 firmware.hex:737434 bytes
+    SHA256 CE27FCCFB4974FBDAC392DDCBC70971883ABC1605AC8999E66DC7D7BD76B17CE
+  teensy41 firmware.hex:740331 bytes
+    SHA256 129540E4381ECF1432C7280B2CB20CE8E73ECD36BC854DC32D774052EC193449
+  Logs:.pio/logs/host-tests.log,teensy40.log,teensy41.log. Details:docs/stage_switch.txt.
+  Task-start backup:TEMP/codex_stage_switch_20261015_052638; final read-only audit:TEMP/codex_stage_switch_final_audit.py.
+  No upload/real COM connection/physicalCAN or real-vehicle movement/limit test; flashing is still required for hardware use.
+
+2026-10-15 Chassis acceleration/deceleration and configurable ICR integration
+  User-confirmed wheel-center spacings: wheelbase260mm, track320mm. Body X forward+, Y right+.
+  Production defaults: ramp enabled, acceleration90turns/s^2, deceleration180turns/s^2, ICR(0,0)mm.
+  Driver90 + yaw correction25 <= safety115turns/s remains unchanged.
+  Common-fraction wheel ramp preserves kinematic compatibility; reversal reaches zero first.
+  Each existing15ms CAN tick advances ramp; elapsed time capped50ms; STOP/link/ODrive fault bypass ramp.
+  ICR applies to rotation and yaw correction; existing stage translation transforms retained.
+  GUI and chassis.motion USB command support stationary-only RAM tuning, capability/freshness validation,
+  draft preservation, finite/range checks, strict7integer command arguments and firmware final eligibility check.
+  Firmware boot defaults remain centralized in system_config.h; no new main-loop scheduling or blocking delay.
+  Status includes motion settings/targets/editable; USB_REPLY_BYTES increased3072->4096.
+  Full test/run_tests.ps1 PASS:489 C++ (194 mechanism,116 chassis/RC,86 system,19 IMU,
+    38 Bench,17 PWM,18 new chassis-motion,1 production-default Bench),96 Python(19 YAML,77 Web),Node frontend.
+  New motion suite uses real main/controller and production ramp defaults; legacy RC/mapping tests
+    explicitly disable ramp at runtime to isolate those behaviors.
+  Cases cover all four wheel-corner/external ICRs, zero velocity at selected pivot, stage changes,
+    15ms CAN cadence, acceleration/deceleration/reversal, rollover, delayed loop, real IMU correction,
+    STOP/link/axis fault, moving/stale/invalid configuration rejection and cylinder/PWM concurrency.
+  Task-start Stage2 YAML already specified STEP3 Extend, STEP5 Retract, STEP6 Pin4/9=1300/1800.
+    Stale regression expectations synchronized to that existing source; all10 YAML byte-identical to task start.
+  All33 generated headers match current YAML (host10,teensy40 10,teensy41 10,include snapshots3).
+  Main/mechanism/RC/CAN/IMU/global-safety/CylinderDriver/Pwm implementation and mechanism_config unchanged.
+  Cylinder remains digital GPIO17/16; Pin14 breathing unchanged; servo standby array unchanged.
+  Existing changed files retain BOM/newline style; new Chinese document validated UTF-8.
+  Actual default motion status fixture2756bytes; extreme numeric status3028bytes within4096byte reply buffer.
+  compile.ps1 -Board teensy40 and teensy41 SUCCESS; zero warning/error diagnostics.
+  teensy40 firmware.hex:746091bytes
+    SHA256 56a95fad677435a18e7b45b259a822364e64aff012286c6300a64883c07ca6a1
+  teensy41 firmware.hex:748971bytes
+    SHA256 869fb6798a49d6c3fa88f782094584d487b577c6b08b74fbfdb193401ed0d5ae
+  Logs:.pio/logs/host-tests.log,teensy40.log,teensy41.log. Instructions:docs/chassis_motion.txt.
+  Backup:TEMP/codex_icr_20261015_074950; final audit:TEMP/codex_icr_final_audit.py.
+  No upload, real COM connection, physical CAN commands or real-vehicle motion tests performed.
+  Physical acceleration, wheel slip and ICR accuracy remain to be validated on the robot.
+
+2026-10-15 Direction-dependent left/right ICR
+  User confirmed common X(current0mm), leftY=-500mm and rightY=+500mm.
+  Independent finite/range-checked Y values in configuration, RAM settings, GUI and status.
+  Calibrated manual rotation sign selects side, with ICR_LEFT_ROTATE_SIGN=1 using existing positive=left convention.
+  Physical left/right convention remains unverified; configurable sign changes center selection only.
+  Centered rotation including dead zone selects body center(0,0); heading correction therefore adds no translation.
+  Existing stage translation, wheel signs, 90+25<=115 speed budget and nonblocking ramp remain.
+  Retargeting a turn preserves acceleration limits; intermediate ramp output is not a fixed single pivot.
+  chassis.motion now requires8integer parameters; old7field requests rejected. GUI requires icr_mode=directional.
+  Full test/run_tests.ps1 PASS:491 C++ scenarios,97 Python(19 YAML+78 Web),Node frontend and wire JSON checks.
+  Added actual-loop both-direction/asymmetric pivot tests, both-Y finite/range validation, neutral dead zone,
+  centered IMU correction, exact8field RAM transport and old firmware/missingY rejection.
+  Legacy direction/yaw suites explicitly select center ICR; production-default motion suite tests new defaults.
+  compile.ps1 teensy40 and teensy41 SUCCESS, zero warning/error diagnostics.
+  teensy40 firmware.hex 746091bytes SHA256 12f5099f8bcad4cacb6852e0aa9efc6f4cc3d379b3e5e001b3e63024014df000
+  teensy41 firmware.hex 748971bytes SHA256 33d18c13800eea4299934d7753279f2bb077efc0fa017d30fc8c58427492f9ca
+  Motion status fixture2814bytes; numeric extreme3081bytes under4096byte reply capacity.
+  All10 YAML and unrelated hardware controller sources unchanged; BOM/newline styles preserved.
+  Backup:TEMP/codex_dual_icr_20261015_084154; audit:TEMP/codex_dual_icr_audit.py.
+  No flashing, real USB/CAN control or physical robot motion performed.
+
+2026-10-15 CH14 independent procession chassis bank
+  User confirmed CH14 General is chassis-only; preserve mechanism state, Stage1 HIGH contextCH14 remains bird.
+  Dedicated boot defaults in SystemConfig::Chassis::Procession:
+    ramp enabled, acceleration90/deceleration180turns/s^2, sharedX120mm,leftY+180mm,rightY-180mm.
+  Uses measured wheelbase260/track320mm and same direction as GeneralCH10 / Stage2(-F,-S).
+  GeneralCH10..14 share latest-stable-HIGH priority/fallback, 30ms debounce and1700/1600us hysteresis.
+  CH7 MID retains context; LOWexit fromStage1 guards allfive held prop keys until released.
+  CH14 selects a separate RAM bank without selectStage calls or autoHome/return/cylinder/servo commands;
+    an already running mechanism continues its existing plan.
+  NEXT/PREV retain the prior explicit mechanism selection and Ready/release eligibility.
+  Failed normal selection preserves procession until accepted; invalid selector/link resets override safely.
+  Normal+procession banks restore independently on selector changes; profile switches preserve wheel ramp.
+  GUI identifies active bank, isolates drafts/pending replies by bank+generation and resets draft on bank change.
+  Cached/fresh status and final firmware expected-profile check reject cross-bank writes.
+  Status motion.profiles=true, profile_id0/1 and rc.procession_mode expose selection.
+  chassis.motion9th argument is expectedprofile0/1; legacy8argument writes are normal-only.
+  Full test/run_tests.ps1 PASS:506 C++ (194mechanism,119chassisRC,86system,19IMU,38Bench,17PWM,32motion,1defaultBench),
+    102Python(19YAML+83Web),Node frontend and strict actual-wire JSON checks.
+  New tests cover exact saved signed values/CH10 mapping, active mechanism preservation, bothICRs,
+    moving transition, boot-heldCH14, normal fallback, Stage1 bird+releaseguard, invalid selector recovery,
+    link/STOP, rejected selection retry, bank RAM isolation and cached/fresh/write/reply profile races.
+  Existing task-start Stage2 YAML already changed Step4 to Pin6=883us/1000ms +1000msdelay with no1400return.
+    Stale generator/system/Bench test expectations synchronized to source; no YAML edited.
+  All10 YAML and unrelated controller/kinematics files byte-preserved; all33 generated headers match sources.
+  Servo standby{1150,2250,2000,2100,1400,1100}, cylinderdigital17/16 and Pin14PWM unchanged.
+  BOM/newline styles preserved. Procession wirefixture2869bytes; extremefixture3136bytes under4096.
+  compile.ps1 teensy40/teensy41 SUCCESS with zero warning/error diagnostics.
+  teensy40 firmware.hex746078bytes SHA256 6cc368ba3edbdec2fd4a6d0216cc8239ad882b1e22c0606c33937df9422ce653
+  teensy41 firmware.hex748958bytes SHA256 3e79e11e69d7404e6bcfdfba04365a815120c951bf0873e778e75dff54cc1824
+  Logs:.pio/logs/host-tests.log,teensy40.log,teensy41.log. Instructions:docs/chassis_motion.txt.
+  Backup:TEMP/codex_procession_20261015_105526; audit:TEMP/codex_procession_final_audit.py.
+  No upload, real COM/CAN control or physical vehicle motion/ICR test performed.
+
+2026-10-15 Three additional Debug servos on Pin10/11/12 (nine total)
+  SERVO_PINS={2,3,4,5,6,9,10,11,12}; startup pulses={1150,2250,2000,2100,1400,1100,1500,1500,1500}.
+  New three defaults1500us; existing six competition standby values remain unchanged.
+  Mechanism status/USBJSON adds pulse10/11/12 and pin10/11/12; servo_pins declares allnine.
+  Existing nonblocking DebugServo scheduler handles independent500..2500us angle endpoints and0..60000ms ramps.
+  WebGUI adds three independent slider/angle/duration/send controls and action-editor choices;
+    unavailable pins disabled and rejected before send against older firmware capabilities.
+  YAMLgenerator supports allninepins and dynamic13distinct parallelactuators (3MKS+9PWM+cylinder).
+  uint16actuator bits remain valid, cylinderbit12 separate fromhighestservo Pin12bit11.
+  STOP detaches allnineServos; original wheelstop/cylinderLOW and independentPin14PWM remain.
+  Full test/run_tests.ps1 PASS:513 C++ (199mechanism,119chassisRC,88system,19IMU,38Bench,17PWM,32motion,1defaultBench),
+    107Python(21YAML+86Web),Nodefrontend and actual-wire JSON checks.
+  Added meaningfulcases for independent endpoints/ramp timing, highest-pin attachfailure, all13parallelbarrier/Prev,
+    nineServoSTOP, realUSBtelemetry, chassis15ms+PWMconcurrency and olderfirmware rejection.
+  Pin10/11/12 do not overlap configuredCAN/UART/IMU/cylinder/PWM. LocalTeensyServo supports12channels viaIntervalTimer.
+  At allnine2500us, Servo ISR refresh mayextend to~22.6ms; no blocking wait added to mainloop.
+  All10YAML byte-preserved; all33generatedheaders matchcurrentYAML.
+  Chassis/CH14procession/RC/IMU/CAN/cylinder/PWM/global-safety sources unchanged; BOM/newline styles preserved.
+  ActualnewservoJSONfixture2952bytes, numericextreme3223bytes under4096byteUSBreplycapacity.
+  compile.ps1 teensy40 andteensy41 SUCCESS with zero warning/error diagnostics.
+  teensy40 firmware.hex746078bytes SHA256 e8b497803eed7a0526dde262e697b5b926297a63620adb0184a535148552e5af
+  teensy41 firmware.hex751838bytes SHA256 208e3ca3847a0e3931bfacbbf4ba69e080550d2c725dfdebc11017b6055c638d
+  Logs:.pio/logs/host-tests.log,teensy40.log,teensy41.log; instructions:docs/web_gui.txt.
+  Backup:TEMP/codex_servo9_20261015_113511; audit:TEMP/codex_servo9_final_audit.py.
+  No upload, real COM/CAN command, waveform measurement or physicalservo motion performed.
+
+2026-10-15 Stage1 Pin2 realtime CH4 trim
+  User confirmed existing500..2500us output limits; CH4standard1000..2000, center1500,
+    deadband1470..1530, configurable maximumoffset+/-150us.
+  RC computes only currentStage1context+actualStage1+mechanismtrimeligibility; invalidknob disablesonlytrim,
+    not chassisjoystickvalidity. Valid900..2100samples clamp tostandardendpoints.
+  Servo base/from/target/YAML/RAM/entry/PREV snapshots remain untrimmed; outputcache applies boundedoffset.
+  Holding andrunningramps refreshPin2withoutaccumulation or newdelay; otherServopins remain unchanged.
+  Acceptedstage/exit/Home requests removeoffsetimmediately; Home/DebugGoHome suspenduntilnextnormalStage1action.
+  Link/invalidsticks/contextloss restorebase; STOP/Fault detachandneverrestartPWM toremoveoffset.
+  Status pulse2reportsactualLastCommand; pulse2_base,stage1_trim_us(actualclippedDelta),stage1_trim_allowed
+    andrc.stage1_trim_us(requested/gatedDelta) added. GUIreadonlypanel distinguishescommandsfromfeedback.
+  Legacytests initializeCH4center1500; newfixtures explicitlyexercisebothknobdirections.
+  Full test/run_tests.ps1 PASS:545 C++ (205mechanism,132chassisRC,100system,19IMU,39Bench,17PWM,32motion,1defaultBench),
+    107Python(21YAML+86Web),Nodefrontend and actual-wire JSON telemetry checks.
+  Added6mechanism,13RC,12actual-loop and1noODrive/noMKSBenchtrimcases.
+  Casescoverdeadband/mapping/invalidrange/monotonicity, hold/nondrift, rampbase, saturation, PREV/propstates,
+    Home/resume/DebugHome, immediateexit/Stage4isolation, failsafes/STOPnorestart,15msCANandPWMconcurrency.
+  Existingall10YAMLbyte-preserved; all33generatedheaders matchsources.
+  Chassis/ICR/CAN/IMU/cylinder/PWM/safety implementations unchanged; CH14selectorsremain; no newmain scheduler.
+  NineServo standby array andcylinder17/16 preserved; BOM/newline stylesretained.
+  Actualtrimwirefixture3056bytes,Homefixture3052bytes,numericextreme3308bytesunder4096byteUSBreplycapacity.
+  compile.ps1 teensy40 andteensy41 SUCCESS withzero warning/error diagnostics.
+  teensy40 firmware.hex748958bytes SHA256 800f23a1a243626f99bf4f2c7d789bdd41953d606fd42fbabfdaf088c82d5b0d
+  teensy41 firmware.hex754718bytes SHA256 4e540cf3e87738628b026adb73c9e46812ab139eeb11c40c69dd8b12d8bfc046
+  Logs:.pio/logs/host-tests.log,teensy40.log,teensy41.log. Instructions:docs/stage1_trim.txt.
+  Backup:TEMP/codex_ch4_trim_20261015_201424; audit:TEMP/codex_ch4_trim_final_audit.py.
+  No upload, real COM/CAN commands, servo waveform or physicalmechanicalstop verification performed.
+
+2026-10-15 XY-160D immediate power-on movement / early GPIO STOP
+  User confirmed electric cylinder, not solenoid; movement starts before initialization completes.
+  Existing begin requested LOW/LOW, not Extend; physical GPIO waveform not measured, root cause remains unconfirmed.
+  GPIO ownership moved to startup_middle_hook before USB waits/constructors; setup reasserts STOP first.
+  preparePins is hardware-only: clear both actual output latches before enabling OUTPUT.
+  Runtime begin resets Stop/Idle without faking a retracted reference or resuming prior motion.
+  Pins17/16, digital direction/deadtime, HOME2 and all mechanism/RC/chassis/PWM/IMU control logic preserved.
+  Added3 actual-loop/GPIO regressions: early/preexistingHIGH/repeated pin preparation, first setup ownership,
+    initialization LOW and reinitialization cancels prior Extend.
+  Host test/run_tests.ps1 PASS:548 C++ (205mechanism,132chassisRC,103system,19IMU,39Bench,17PWM,32motion,1defaultBench),
+    107Python (21YAML+86Web),Nodefrontend and actual-wire JSON telemetry checks.
+  Concurrent user Stage3 YAML pulse/ramp edits retained. Old Stage3 zero-duration regression assumptions updated:
+    RAM servo duration follows configured duration; paired motor completion and switch/RC endurance also wait for configured servo ramp.
+  Earlier reruns exposed those stale zero-duration assertions; final suite above passed after updates.
+  compile.ps1 teensy40 andteensy41 SUCCESS; no warning/error diagnostics.
+  Both ELF images verified: startup_middle_hook is strong T symbol, ResetHandler2 calls it before usb_init,
+    preparePins/hook clear GPIO6 DR_CLEAR twice before pinMode OUTPUT, setup calls preparePins before USB begin.
+  Current settings unchanged in include/system_config.h; no YAML edits made by this task.
+  Software cannot hold pins LOW while unpowered, in ROM/bootloader, or before this hook executes.
+  Hardware input pulldowns/common ground and actual LOW/LOW waveform still require physical confirmation.
+  No upload, real serial/CAN commands or electric-cylinder power-on test performed.
+  Details/sources:docs/cylinder_startup.txt. Backup:TEMP/codex_cylinder_boot_20261015_222226.
+  teensy40 firmware.hex 748984bytes SHA256 404f32d39cd1be581a84a6cd952728d121f5a0468150fc76dca5a0d76617a95e
+  teensy41 firmware.hex 754744bytes SHA256 281c4fca5be2f304a0e20127e7915e171e654b34a998bc9601fa8bf2bc1c0ae6
+
+2026-10-15 ICR default XY reset to chassis center
+  Normal and CH14 procession profiles: shared X=0, left Y=0, right Y=0 millimeters.
+  GUI initial fields and current motion documents updated; RAM adjustment remains available.
+  Existing motion regression assertions updated; independent-turn test explicitly loads nonzero custom centers.
+  Strict native chassis_motion_regression:32 scenarios PASS; both profile status fixtures report(0,0,0).
+  Node frontend regressions PASS. compile.ps1 teensy40 andteensy41 SUCCESS without warning/error diagnostics.
+  Full test/run_tests.ps1 stops at preexisting Stage2 YAML/expected-profile mismatch:
+    test_stage2_exact_targets_and_generated_wire. Current Stage2 has4steps/2000ms, old test expects6steps/3000ms.
+    Stage2 YAML and its expected profile were preserved; do not report the entire suite as passed.
+  No flashing/hardware motion performed; firmware defaults take effect after upload/restart.
+  Backup:TEMP/codex_icr_zero_20261015_232154.

@@ -1,0 +1,63 @@
+第四關擲筊／第六關水果 ID6 的 CH4 高度微調
+2026-10-16 / Asia/Taipei
+
+操作
+  CH7 切到 LOW 一般模式，以 CH12 選擇第四關擲筊，或 CH14 選擇第六關水果。
+  CH4 是線性旋鈕：1000us／2000us 對應擲筊 -200／+200 脈衝，水果 -2000／+2000 脈衝；1500us 為 0。
+  1470..1530us 為中心死區；兩側扣除死區後線性映射到最大偏移。
+  先按 NEXT 執行正式 STEP；STEP 完成並進入 Ready 保持後，旋鈕才以低速微調 ID6。
+  水果 ID6 絕對位置限制為 -1400..10500 脈衝，正式 STEP、微調、Debug 與 RAM 都受此限制；超界即截斷。
+  ID6 的 10500 上限適用所有關卡與正式 STEP／CH4／Debug／RAM；只有水果使用 -1400 下限，其他關卡下限不變。
+  第一關夾雞／夾小鳥的 9200 依各自 YAML 執行，位於共用上限內；第三關 ID4/5 不套用 ID6 上限。
+  ID6 已隔離時仍需清除卡點並手動 HOME，提高上限不會解除隔離。
+  水果微調要求仍為 ±2000，接近行程邊界時實際偏移較小；GUI 要求與已完成偏移可能不同。
+  微調目標 = 未微調的正式 STEP 基準位置 + CH4 偏移；反覆轉動不會累加至基準。
+  正偏移使 FE 絕對座標增加，負偏移使座標減少；實體上升／下降依機構方向而定。
+  步驟運行中保留原流程；擲筊 STEP4 高速彈射與自動回降兩段都完成後，才接受微調。
+  水果 STEP1..4 完成後可微調；STEP5 釋放完成後直接自動 HOME，不插入微調。
+  每 100ms 最多下發一個微調目標，收到 ACK 後才追隨旋鈕最新位置。
+  微調收到完成 ACK 前，不接受 NEXT/PREV，不排隊；請待 Ready 後重新按鍵。
+  CH4 置中後，以相同低速返回當前 STEP 的未微調基準。
+
+互鎖
+  只對一般模式的第四關與第六關 ID6 生效；第一關 CH4 微調 Pin2 的功能維持原流程。
+  HOME、切關、遙控斷線／資料無效、Debug、STOP/Fault 都會停用高度微調。
+  斷線／無效／情境改變時不額外下發回基準指令，已送出的低速微調仍等 ACK。
+  停用後不會因旋鈕仍有偏移而自行重新啟動；下一次 NEXT 正式 STEP 完成後才恢復。
+  HOME／切關會停用微調；水果動作中切出時立即停止，活動步進位置設為未知，不以 FE 回未知原點。
+  水果 ID6 超時或拒絕指令改為局部隔離，保留激磁；可切到第二／第三關繼續。
+  第一／第四／第六關共用 ID6；排除卡點後須手動 HOME 並確認尋零開始及完成回報才解除隔離。
+  停止指令未成功送出前不允許同軸新運動，HOME 失敗仍隔離；全域 STOP 不可繞過。
+  水果自動 HOME 完成後回 STEP0，偏移歸零；即使 CH4 未置中也不重啟微調，下一輪 NEXT 正式 STEP 完成後才恢復。
+  微調保留目前 STEP 與進度，不新增一段、不改 YAML／RAM 的正式動作位置。
+  全域 STOP 仍停用馬達，不會為了回基準再次啟動馬達。
+
+擲筊與水果可調參數：include/system_config.h / SystemConfig::Rc
+  STAGE4_TRIM_MAX_OFFSET_PULSES = 200   擲筊最大正負偏移，單位脈衝。
+  FRUIT_TRIM_MAX_OFFSET_PULSES = 2000   水果最大正負偏移，單位脈衝。
+  STAGE4_TRIM_RPM = 100                 微調速度；不影響正式 STEP 或彈射速度。
+  STAGE4_TRIM_ACC = 5                   微調加速度參數；依 MKS 驅動器的 ACC 定義。
+  STAGE4_TRIM_DIRECTION = 1             可設 1 或 -1；預設高值旋鈕為正脈衝，設 -1 反向。
+  微調範圍分開設定；速度、加速度、方向與更新間隔沿用 STAGE4_TRIM_*，第四關與第六關共用。
+  調整後重新編譯／燒錄。正式位置分別修改 stage4_steps.yaml（擲筊）及 stage6_steps.yaml（水果）。
+
+Web GUI 與串口狀態
+  「擲筊／水果高度旋鈕微調」唯讀面板依目前第四關／第六關顯示擲筊或水果啟用狀態，保留原第一關 Pin2 面板。
+  顯示 CH4 原始輸入、旋鈕要求偏移、已完成偏移、ID6 基準／最後完成位置／已送目標。
+  微調中顯示「等待 ACK」，正式動作中顯示「等待 STEP 完成」。
+  未接 USB、狀態過期或舊韌體缺少欄位時顯示未取得，不捏造偏移值。
+  下列既有 stage4_trim_* 欄位名稱同時用於第四關與第六關，保留串口與 GUI 相容。
+  rc.stage4_trim_pulses：情境互鎖後的旋鈕要求偏移。
+  position6_base：未含微調的正式 STEP 基準。
+  stage4_trim_pulses：最後已完成的實際偏移。
+  stage4_trim_target：最近已下發的微調絕對位置目標。
+  stage4_trim_allowed：當前情境允許微調；正式 STEP 執行中仍須等 Ready。
+  stage4_trim_moving：是否正在等待微調完成回報。
+  position6：最後取得完成回報的 ID6 目標，不是即時編碼器位置。
+
+水果限位與隔離遙測
+  id6_position_max：各關共用 ID6 FE 上限 10500，由 SystemConfig::ID6_POSITION_MAX 設定。
+  fruit_position_min / fruit_position_max：水果 ID6 FE 下限 -1400／共用上限 10500（相容欄位）。
+  motor_recovery_mask：局部隔離軸，bit0/1/2 依序對應 ID4/5/6。
+  stage_recovery_required：當前關卡是否共用被隔離軸；true 時禁用 NEXT／RUN／PREV／道具觸發，仍可切關與手動 HOME。
+  mechanism_warning：局部隔離原因；全域 stopped 仍有最高優先權。

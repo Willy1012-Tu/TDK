@@ -1,0 +1,87 @@
+TDK YAML 操作說明（2026-10-12）— Stage4_Mechanism_Test
+
+編輯與生效
+  根目錄 stageN_steps.yaml 支援關卡 2、3、4，Build 前驗證並生成 三份 C++ 標頭。
+  修改 YAML、Build／Upload 後成為開機內建表；只儲存檔案不會改正在使用的 RAM。
+  GUI 立即套用可免重新燒錄；完整驗證／commit 後才交換有效表，重啟回到韌體內建設定。
+  不要手改 .pio/build/<board>/generated/ 內的標頭。
+
+開機尋原點與位置
+  本版啟用 MKS ID6／ID7；ID4/5 未接線，Pin3 不 attach，也不接受動作指令。
+  STARTUP_RETURN_ZERO=true：兩顆完成 0x8C 回報設定及 0xF3 啟用 ACK 後，同批發送 0x91 尋原點。
+  開機雙軸尋原點，兩顆各自開始 01→完成 02 都收到後才 Ready；不自動執行第二關 STEP1。
+  Pin2=1150、Pin5=2100、Pin4=2000、Pin6=1400、Pin9=1800 us，為本次指定開機待機值。
+  position_known_mask 初始化0；bit2=ID6（4）、bit3=ID7（8），全部確認為12才完成開機尋原點。
+  未確認的軸 GUI 顯示「尚未確認位置」；確認後顯示最近完成目標，仍不是編碼器實測值。
+  HOME第四關只尋ID6；HOME 第二關只尋 ID7，並恢復 Pin4/6/9 待機2000/1400/1800。
+  Debug 可選 ID6 或 ID7；GoHome 發91依既有HM實際移動，「移到位置0」則發FE絕對目標0。
+  0x91 是尋原點，0x80 才是校正；本版不自動發80校正或92重設目前坐標。
+  若自行改 STARTUP_RETURN_ZERO=false，開機僅設定／啟用，軟體0不重設驅動器FE坐標，也不確認原點。
+  8C／F3 每500ms非阻塞重試，每顆每種設定指令各有固定10秒ACK上限；明確拒絕立即Fault。
+  91／FE 運動不因缺回覆而自動重送；任一Fault或STOP鎖存，需檢查後重啟控制板。
+  鮑率CAN1為1Mbps，HM方向／速度／限位與工作模式沿用驅動器既有設定。
+
+第二關：stage2_steps.yaml，4段、repeat_from=2
+  從其他關切入第二關，自動執行 STEP1 預備；同一有效第二關重複選入不重做。
+  STEP1：ID7=-8000，320 RPM/ACC2；同時 Pin9=1800、Pin4=1300 us。
+    等 ID7 開始→完成回報與同組伺服指令完成才接受下一鍵。
+  第一次 NEXT（STEP2）：Pin9=1100、Pin4=2000 us 同時輸出。
+  第二次 NEXT（STEP3）：ID7=-3000，320 RPM/ACC2；同時 Pin6=2200 us。
+  第三次 NEXT（STEP4）：Pin6=1600、ID7=-8000（320 RPM/ACC2）、Pin9=1800、Pin4=1300同動。
+  之後 NEXT 循環 STEP2→3→4；STEP1僅新切入或新套用RAM時自動準備，RUN則從STEP1全表跑一次。
+  所有servo duration_ms省略，預設立即寫入；未列出的伺服保持最近輸出。
+  套用第二關新RAM也自動STEP1；網頁等預備完成並Ready後才報成功，Fault／STOP／逾時不標記成功。
+  HOME第二關以91尋ID7，並恢復Pin4=2000、Pin6=1400、Pin9=1800；HOME完成後NEXT由STEP1重新開始。
+
+第三關：stage3_steps.yaml，STAGE3_ENABLED=false
+  暫時拔除稻草卷機構，只保留repeat_from=1、一段delay0待機。
+  HOME／NEXT／RUN不發馬達或舵機指令；離開第三關立即切換，不執行Park。
+  第三關不能套用含致動器的RAM表；實際控制器選中第三關時，Debug致動器控制全部拒收。
+  切到第二或第四關即可調試；僅載入第三關電腦YAML不改控制器關卡。
+
+YAML 第二關完整表
+  stage: 2
+  repeat_from: 2
+  steps:
+    - actions:
+        - parallel:
+            - stepper: {node: 7, position: -8000, rpm: 320, acc: 2}
+            - servo: {pin: 9, pulse_us: 1800}
+            - servo: {pin: 4, pulse_us: 1300}
+    - actions:
+        - parallel:
+            - servo: {pin: 9, pulse_us: 1100}
+            - servo: {pin: 4, pulse_us: 2000}
+    - actions:
+        - parallel:
+            - stepper: {node: 7, position: -3000, rpm: 320, acc: 2}
+            - servo: {pin: 6, pulse_us: 2200}
+    - actions:
+        - parallel:
+            - servo: {pin: 6, pulse_us: 1600}
+            - stepper: {node: 7, position: -8000, rpm: 320, acc: 2}
+            - servo: {pin: 9, pulse_us: 1800}
+            - servo: {pin: 4, pulse_us: 1300}
+  四STEP展開為15個Action，offset/count為[0,4],[4,3],[7,3],[10,5]。
+
+根層與動作格式
+  stage：2、3、4，省略保留舊預設4；repeat_from：1..STEP數，省略1。
+  NEXT 最後一段後回 repeat_from；RUN 只跑全部一次，不自動 HOME。
+  steps：1..254段，每段 actions：1..256項，展開後每關最多 2048 個 Action。
+  stepper：node只允許6或7（省略預設6）；position=-8388607..8388607 絕對脈衝，rpm=1..3000，acc=0..255（預設0）。
+  servo：pin只允許2、5、4、6、9；pulse_us=500..2500，duration_ms=0..60000（預設0）。
+    duration>0 採線性緩移；完成表示輸出與計時完成，沒有舵機位置感測。
+  delay：ms=0..60000，等待不阻塞控制器；0不等待。
+  parallel：1..7個不同致動器，只接受stepper與servo，不能重複同node／同pin，也不接受巢狀parallel／delay。
+    展開先派步進再派伺服，最後waitAll；等所有開始→完成回報及緩移完才繼續。
+    同動指相近排程時點派發，沒有保證機械在同一微秒啟動。
+  第三關例外：固定 stage3/repeat1/單STEP單delay0；任何致動器或其他待機表形狀均拒收。
+  ID4/5 與 Pin3 在生成器、RAM、Debug 都不允許；重新接線需要同步更新硬體設定與驗證。
+
+驗證與協定
+  拒絕未知欄位、重複YAML鍵、無效腳位／ID、bool當整數、同組重複致動器及容量超限。
+  接受 UTF-8/BOM、註解、flow mapping；使用安全Loader，不建構任意物件。
+  YAML 驗證失敗中止Build，不以過期表悄悄繼續。
+  RAM action保留原欄位順序，node是末欄；servo/delay/waitAll node=0。
+  Stage2/3/4 生成表共用 Stage4::Action 型別，Stage2 helper 亦為 Stage4::servo；helper明確限定namespace，避免Arduino delay撞名。
+  測試：test/test_generate_steps.py；GUI與RAM：test/test_web_gui.py；整套：test/run_tests.ps1。

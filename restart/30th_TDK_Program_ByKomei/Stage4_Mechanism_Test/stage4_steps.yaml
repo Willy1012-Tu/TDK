@@ -1,0 +1,37 @@
+# 第四關：北港迎媽祖 / 擲筊。
+# 0x91 尋原點建立位置 0；以下全部為 0xFE 絕對脈衝坐標。
+# Home：ID 6 = 0，Pin 2 = 1150 us，Pin 5 = 2100 us。
+stage: 4
+repeat_from: 1
+steps:
+  # STEP 1：微幅提升與夾持預備。
+  - actions:
+      - parallel:
+          - stepper: {node: 6, position: -600, rpm: 320, acc: 0}
+          - servo: {pin: 2, pulse_us: 1500}
+          - servo: {pin: 5, pulse_us: 1400}
+  # STEP 2：維持 -600，鎖定筊杯。
+  - actions:
+      - servo: {pin: 2, pulse_us: 1120}
+  # STEP 3：下降蓄力，同時以 2 秒平滑調整傾角；兩者都完成才結束。
+  - actions:
+      - parallel:
+          - stepper: {node: 6, position: -8100, rpm: 320, acc: 5}
+          - servo: {pin: 5, pulse_us: 1550, duration_ms: 2000}
+  # STEP 4：高速彈射完成後，立即自動回降到 -2600，不需再按 next。
+  - actions:
+      - parallel:
+          - stepper: {node: 6, position: -600, rpm: 1500, acc: 0}
+          - servo: {pin: 5, pulse_us: 1400}
+      - parallel:
+          - stepper: {node: 6, position: -2600, rpm: 320, acc: 0}
+          - servo: {pin: 5, pulse_us: 1800}
+  # STEP 5：維持 -2600，解鎖；Pin 5 保持 1800 us。
+  - actions:
+      - servo: {pin: 2, pulse_us: 1500}
+  # STEP 6：步進與兩顆舵機回開機待機位置。
+  - actions:
+      - parallel:
+          - stepper: {node: 6, position: 0, rpm: 320, acc: 0}
+          - servo: {pin: 2, pulse_us: 1150}
+          - servo: {pin: 5, pulse_us: 2100}

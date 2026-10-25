@@ -1,0 +1,70 @@
+第六關取水果 / CH14（2026-10-16）
+
+選關
+  CH7 LOW一般模式：CH10/11/12/13/14依序選第2/3/4/5/6關。
+  CH14不再啟用底盤繞境/反向設定；第6關底盤使用標準車頭方向。
+  CH7 HIGH第一關模式：CH14仍為小鳥。
+  第四關擲筊及其他關卡YAML保留。
+
+操作
+  NEXT逐段執行stage6_steps.yaml五段。每段都等步進回報和伺服緩移完成。
+  第5段釋放完成後，自動FE回ID6=0、Pin2=1150、Pin5=2100。
+  自動回位顯示home_wait；全部完成後STEP0/ready，下一次NEXT開始STEP1。
+  RUN會執行五段及自動回位一次。回位期間不可NEXT/PREV排隊。
+  水果動作中切到不同關卡時立即停止活動軸與電缸、取消舊動作，不繼續等待卡住的回報，也不以 FE 回未知原點。
+  被中止的步進軸位置設為未知；未成功送出停止指令前不允許該軸新運動或 HOME。
+  CH4第一關Pin2微調不會套用水果關卡。
+  水果使用獨立的ID6高度微調，與第四關擲筊共用CH4、速度及互鎖，微調範圍獨立設定。
+  自動回位使用已建立零點的FE，並非重新找限位開關。
+
+CH4高度微調
+  CH7 LOW一般模式，以CH14選第六關水果。STEP1..4全部完成並進入Ready後，可轉CH4微調ID6。
+  預設1000..2000us對應-2000..+2000脈衝，1470..1530us為中心死區；置中回該STEP的原基準。
+  水果 ID6 所有 FE 目標限制在 -1400..10500 脈衝（包含微調、正式 STEP、Debug 與 RAM），超界時截斷。
+  ID6 的 10500 上限適用所有關卡（第一／第四／第六關，以及其他關卡的 ID6 RAM／Debug 動作）；只有 -1400 下限限於水果關卡。
+  第一關夾雞／夾小鳥的 9200 脈衝依各自 YAML 執行，位於共用上限內；第三關 ID4/5 行程不變。
+  若 ID6 仍處於局部隔離，必須先排除卡點並手動 HOME；調高水果上限不會解除隔離。
+  ±2000 是旋鈕要求，實際可用偏移受當前基準與上下限影響；要求與完成偏移不同是正常限位結果。
+  微調為正式基準加偏移，不逐次累加；以100 RPM、ACC5低速移動，等待完成ACK後才接受NEXT/PREV。
+  正式STEP執行中不插入微調。第5段後立即自動HOME並停用，回到STEP0時偏移為0；
+  即使旋鈕未置中仍不自行重啟，下一輪NEXT完成正式STEP後才恢復。
+  HOME、切關、斷線、Debug與STOP均停用；第一關Pin2微調保持原用途。
+  include/system_config.h / SystemConfig::Rc的FRUIT_TRIM_MAX_OFFSET_PULSES = 2000控制水果微調範圍；
+  擲筊範圍由STAGE4_TRIM_MAX_OFFSET_PULSES = 200獨立設定。
+  STAGE4_TRIM_RPM、STAGE4_TRIM_ACC與STAGE4_TRIM_DIRECTION仍由第四關與第六關共用。
+  GUI「擲筊／水果高度旋鈕微調」顯示原始旋鈕、要求／完成偏移、基準及目標；只讀取狀態，不發控制命令。
+  為相容舊介面，狀態仍沿用rc.stage4_trim_pulses與stage4_trim_*欄位；位置為最後完成目標，非編碼器即時值。
+
+卡住後恢復
+  水果 ID6 拒絕指令或 ACK 逾時時，停止並局部隔離 ID6，保留激磁，不觸發全車 STOP。
+  GUI 顯示隔離警告；可切至不共用 ID6 的第二／第三關繼續作業。
+  第一／第四／第六關共用 ID6，隔離期間 NEXT／RUN／PREV／道具觸發與 Debug FE 運動禁用。
+  排除機械卡點後，在第一／第四／第六關手動 HOME；收到尋零開始與完成回報後才解除隔離。
+  HOME 失敗仍維持局部隔離，可切到其他可用關卡。
+  全域 STOP 維持原本鎖定行為，不可透過切關或 HOME 解除。
+  狀態 JSON：motor_recovery_mask 位元依序對應 ID4/5/6，stage_recovery_required 表示目前關卡被隔離軸阻擋；
+  mechanism_warning 提供原因，id6_position_max 提供共用上限 10500；fruit_position_min 為 -1400，fruit_position_max 保留相容且同為 10500。
+  共用上限設於 SystemConfig::ID6_POSITION_MAX；Fruit::POSITION_MAX 沿用該值，修改後需重新編譯／燒錄。
+
+調整自動回位（include/system_config.h / SystemConfig::Fruit）
+  RETURN_RPM = 320：自動回位轉速，增加可提高設定轉速（例如先試500）。
+  RETURN_ACC = 200：MKS ACC協定參數0..255；不是物理加速度單位，請依驅動器設定調整。
+  SERVO2_HOME_US = 1150：水果回位夾爪姿態。
+  SERVO5_HOME_US = 2100：水果回位傾角。
+  SERVO_HOME_DURATION_MS = 500：兩顆伺服回位緩移時間，數值越小越快。
+  修改這些C++常數需重新Build/Upload。回位速度不影響其他關卡。
+  手動HOME與開機尋零使用0x91；其速度取決於驅動器HM參數，
+  RETURN_RPM/RETURN_ACC不會變更0x91尋零速度。
+
+調整動作（stage6_steps.yaml）
+  stepper.position為FE絕對脈衝；rpm為轉速；acc為驅動器ACC。
+  servo.pulse_us為姿態設定（500..2500us）；duration_ms為緩移時間。
+  以500..2500us映射0..180度時：pulse_us = 500 + 角度 * 2000 / 180。
+  1389約80度，1611約100度，889約35度，1600約99度。
+  實際角度仍依舵機型號與機構安裝而定。
+  在GUI選第6關編輯並套用RAM可即時測試；保存YAML並Build/Upload才成為開機預設。
+
+驗證
+  fruit_rc_selection / fruit_auto_return / fruit_run_and_stop /
+  fruit_switch_during_return / fruit_ram_profile：主機模擬通過。
+  未燒錄與實機驗證，原有第二關等舊測試期待值仍需另行同步。

@@ -1,0 +1,50 @@
+XY-160D 電動缸上電誤動與啟動STOP
+2026-10-15 / Asia/Taipei
+
+已確認的情況
+  使用者目前仍使用XY-160D接兩條馬達動力線的電動缸，回報一上電、初始化未完成即伸出。
+  未量測實際GPIO波形，因此不能把輸入浮接／模組誤觸發視為已確證根因。
+  程式原有CylinderController::begin()只輸出LOW/LOW，沒有開機Extend。
+  原順序為setup先Serial/PWM/CAN/RC/底盤初始化，之後機構begin才設定電動缸腳位。
+
+軟體查到的空窗
+  專案使用Teensy4.x核心1.62，startup.c在startup_middle_hook後才進USB20ms+280ms啟動等待，
+  再執行C++constructors與setup。原電動缸腳位要等到這些流程之後才由程式主動拉低。
+  官方資料指出GPIO預設INPUT，多數有keeper，不能等同已主動輸出LOW。
+  XY控制輸入若在MCU尚未接管時被拉高，可能造成誤動；這是待實機驗證的推論。
+
+修正
+  CylinderController::preparePins()為純硬體初始化，不使用Serial、heap、timer或C++物件。
+  Teensy4.x用digitalWriteFast先清兩路實際GPIO輸出暫存器，再pinMode OUTPUT；
+  不用一般digitalWrite(INPUT,LOW)冒充輸出latch清除，避免暖重啟舊latch為HIGH時短暫輸出HIGH。
+  startup_middle_hook在USB啟動等待與全域C++constructors之前呼叫preparePins。
+  setup第一行再呼叫preparePins，早於Serial.begin/CAN/RC/Servo。
+  CylinderController::begin仍呼叫preparePins，並把運行狀態重設為Stop/Idle、referenceKnown=false。
+  2026-10-17更新：MechanismController::begin接著啟動Retract5000ms，先50ms全LOW等待，與MKS開機初始化非阻塞並行；完整回縮計時結束才建立fully_retracted。
+  既有程式IN1_PIN=17、IN2_PIN=16、數位HIGH/LOW伸縮方向與50ms反轉deadtime均保持。
+  若CH10在一般模式保持HIGH，開機完整回縮已完成後切入第二關只設定伺服待機；缸後續已移動或中斷才需再HOME2 Retract5000ms。
+  這與韌體啟動前誤動是不同時點，原比賽選關行為不改。
+
+硬體接管前的限制與排查
+  ROM啟動、Bootloader、控制板尚未上電或韌體尚未執行時，軟體無法強制GPIO。
+  需要電源一接上就有確定的STOP輸入時，應在驅動控制訊號端加入適當硬體下拉。
+  可由控制訊號16、17各接一顆約10kΩ到共地，並依模組輸入電路確認確實能保持LOW；
+  是訊號輸入端，不是馬達動力輸出端。Teensy與XY模組需共地。
+  目前軟體交換過邏輯IN1/IN2以配合馬達極性，實體兩條控制線仍是16／17；
+  下拉兩條訊號即可，勿把GPIO接到12V／24V動力端。
+  若燒錄後，電動缸仍在韌體開始前動，檢查未啟動時兩路的實際電壓／下拉／接地／模組。
+  若LOW/LOW實際已維持但馬達仍動，需檢查XY控制端／模組與接線，不能由程式STOP狀態推定硬體已停止。
+  開機受控縮回及後續需回縮時，查看GUI cylinder.action：1=Extend、2=Retract、0=Stop；
+  如果程式顯示Retract而實際Extend，才另行確認馬達極性／兩路控制方向。
+
+驗證
+  主機案例驗證原輸出HIGH後prepare先LOW再OUTPUT、重複準備不啟動動作、
+  setup先接管電動缸並維持LOW/LOW；機構begin經50ms等待後受控Retract，重置不續跑舊Extend。
+  Teensy4.0與4.1編譯後檢查startup_middle_hook為強符號，並確認preparePins在hook與setup被呼叫。
+  本次尚未燒錄、量測波形或實際電動缸上電測試。最終結果見docs/verification.txt。
+
+一手來源
+  PJRC startup順序與hooks：https://www.pjrc.com/teensy/td_startup.html
+  PJRC Teensy4.0 GPIO預設：https://www.pjrc.com/store/teensy40.html
+  PJRC Teensy4.1 GPIO預設：https://www.pjrc.com/store/teensy41.html
+  本機核心：../tmp/pio/packages/framework-arduinoteensy/cores/teensy4/startup.c、core_pins.h、digital.c

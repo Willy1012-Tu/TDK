@@ -1,0 +1,6 @@
+# 第三關機構暫時未接線：ID4/5 與 Pin3 已停用，不發致動器指令。
+stage: 3
+repeat_from: 1
+steps:
+  - actions:
+      - delay: {ms: 0}

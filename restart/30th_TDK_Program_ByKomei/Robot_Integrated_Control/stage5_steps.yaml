@@ -1,0 +1,6 @@
+# Stage 5 reserved profile: no actuator action.
+stage: 5
+repeat_from: 1
+steps:
+  - actions:
+      - delay: {ms: 0}

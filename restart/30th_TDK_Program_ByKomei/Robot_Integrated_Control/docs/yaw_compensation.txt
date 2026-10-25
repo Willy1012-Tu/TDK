@@ -1,0 +1,8 @@
+BNO055 與航向補償已移除（2026-10-15）
+  韌體不再初始化或讀取 BNO055，不再占用 SDA18/SCL19 進行 IMU 通訊。
+  底盤只使用遙控器、關卡方向、ICR 與加減速設定；不會自動鎖定或補正航向。
+  正常搖桿輪速上限保留 90 turns/s，防護上限保留 115 turns/s。
+  15ms CAN 速度排程、心跳鎖定、斷線保護、全車 STOP、各關機構與 PWM 功能保留。
+  status 不再提供 imu、yaw、pitch、roll 或 chassis.yaw_compensation；GUI 姿態卡已移除。
+  請同步燒錄新韌體並重新啟動 Web GUI、重新整理網頁。
+

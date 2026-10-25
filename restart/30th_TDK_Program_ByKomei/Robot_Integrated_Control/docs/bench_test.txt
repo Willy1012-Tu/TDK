@@ -1,0 +1,107 @@
+Robot_Integrated_Control 檯面調校／單關獨立測試
+2026-10-14 / firmware_revision=bench-test-v7
+
+開關與責任
+  include/system_config.h的SystemConfig::BENCH_TEST_MODE預設true，修改為false恢復比賽互鎖。
+  此旗標是編譯設定，不是遙控器通道或GUI即時切換；變更後Build／Upload才生效。
+  ROBOT_BENCH_TEST_MODE=0／1是主機回歸的編譯覆寫，用來驗證兩路；正式預設另以無覆寫驗證。
+  rc_controller.cpp只放寬機構對ODrive Running／healthy／state8的要求，仍要求RC link／valid且未SystemSafety STOP。
+  mechanism_controller.cpp分開online／offline與active：online是開機通訊確認，active是運動等待狀態。
+  serial_gateway.cpp輸出模式與位元旗標；Web GUI顯示Bench、離線／未參考，拒絕離線Debug點動。
+  底盤控制器、全車STOP、CAN1／CAN2分工、15ms底盤排程及IMU驅動不變。
+
+開機流程
+  電動缸Pin16／17先LOW/LOW，九PWM到待機值（新增Pin10/11/12各1500us）；不自動執行關卡STEP。
+  MKS仍配置ID4／5／6，各依序8C→83→F3；成功軸才建立零點：4／5使用92原位零，6使用91限位尋零。
+  Bench缺某設定ACK10秒：印Bench warning、標記該軸offline與unreferenced，跳過後續電流／啟用／零點設定。
+  ZeroQueue會另外略過離線4／5，不錯用initMotor索引；6離線時不發91，沒有離線軸運動ACK屏障。
+  500ms CAN enqueue逾時也容錯略過，供整條CAN無供電／無ACK造成輸出佇列滿時繼續啟動。
+  若91已成功發送但10秒沒有開始ACK，對該軸盡力F7停止與F3停用，再標記離線，不觸發全車STOP。
+  已收到開始ACK1卻無完成ACK2、明確設定ACK0或運動拒絕，仍為真正故障，維持全車STOP。
+  三顆都沒有回報時，逐顆ACK等待約31秒含1秒開機等待；CAN無法入列可能更早略過。
+  等候皆是非阻塞，RC、USB、IMU與底盤持續poll；需phase=ready後再放開並按機構鍵。
+  offline不因遲到回報或中途插線自動恢復；接好後重啟控制板重新初始化，避免未知零點直接移動。
+
+只接第二關
+  只接Teensy、ELRS、XY-160D與Pin4／6／9舵機即可；MKS與四ODrive可全部不供電。
+  XY-160D與Teensy共地，程式邏輯IN1=17／IN2=16；配合目前馬達極性，僅對調程式定義，保留現有16／17實體接線。Pin14專用於呼吸PWM。
+  電動缸與PWM沒有CAN ACK或外部接線偵測，缺硬體不會通訊逾時；GPIO動作仍按設定時間完成。
+  CH7切LOW進一般模式，CH10選第二關。開機完整縮回計時已完成時，切入僅設定4／6／9=2000／1400／1100後Ready STEP0；尚未完整縮回則先HOME2回縮5000ms。
+  CH6 NEXT：STEP1僅9=1800、4=1300平行；STEP2為9=1000、4=2100。
+  STEP3縮回3000ms；STEP4為6號緩移至550us、等待1000ms、再緩移回1400us（兩次緩移各1000ms）。STEP5伸出3000ms；STEP6為4=2000、9=1100平行緩移1000ms；後續由STEP2循環。
+  CH5 PREV照已完成的定時計畫復原；未知／中斷缸姿態只Stop，不虛構行程。
+  機構運轉仍不排隊，Ready後放開再按；全車STOP立即LOW/LOW且鎖存到重啟。
+
+只接第一／四關
+  接ID6與Pin2／5；ID4／5未接各略過，ID6仍按8C／83(5200mA)／F3與91初始化。
+  ID6成功尋零後可以執行其FE動作；CH7 HIGH第一關，CH10..14觸發五道具，CH6後續NEXT、CH5 PREV。
+  CH7 LOW退出第一關仍對在線ID6做91後預設第四關；若ID6離線則略過，不反覆排HOME卡死。
+  一般LOW模式CH12選第四關，CH6／5操作其流程；待機Pin2=1150、Pin5=2100保持原設定。
+
+只接第三關
+  接ID4／5與Pin3；兩軸8C／83(3000mA)／F3成功後各92原位建立FE零點，不發91。
+  ID6未接會略過；CH7 LOW、CH11選第三關，CH6／5測其既有四段YAML。
+  切離第三關只對在線且有零點的軸FE回0、Pin3回2250；等待實際已發軸完成才交接。
+  未接其中一軸時該軸動作直接略過；不修改相對軸方向、YAML坐標或故障判斷。
+
+狀態判讀
+  @1 status：bench_test_mode=true；motor_online_mask、motor_offline_mask、position_known_mask的bit0／1／2對應4／5／6。
+  全部未接Ready：online_mask=0、offline_mask=7、position_known_mask=0、stopped=false。
+  只有6正常Ready：online_mask=4、offline_mask=3、position_known_mask=4。
+  只有4／5正常Ready：online_mask=3、offline_mask=4、position_known_mask=3。
+  尚在開機等待時某軸未確認，online／offline均可0；只有被判定略過才offline位元成立。
+  online不是持續MKS心跳監視。position4／5／6仍是最近完成目標，不是實測編碼器。
+  GUI可以顯示底盤LOCKED，同時機構Ready可接受RC；Bench只放寬機構互鎖，不強制底盤進Running。
+  Debug離線軸拒收；在線未參考軸不允許FE，在線6可明確GoHome建立零點，4／5仍禁止91。
+
+保護與驗證範圍
+  開機缺回報只印警告並略過；已在線運動失去回報、限位拒絕、設定ACK0、PWM初始化失敗仍STOP。
+  軟體STOP／Fault立即關閉電動缸GPIO並停止／停用MKS與九顆舵機PWM；Pin14呼吸PWM持續；物理急停沒有MCU輸入，仍由外部斷電處理。
+  主機測試以假CAN／CRSF／GPIO與虛擬時鐘驗證，不代表實體接線、限位及負載驗證；本次不自動燒錄或發實車命令。
+  test/run_tests.ps1同時驗證原比賽模式與新增Bench場景；兩板compile.ps1及最終結果見verification.txt。
+
+Pin14呼吸PWM與方向修正（2026-10-15）
+  電動缸邏輯IN1=Pin17、IN2=Pin16，Pin14專用於0→55→0的8-bit呼吸PWM，每5ms變動一階。
+  PwmController以begin／poll非阻塞排程，與15ms底盤CAN及舵機／電動缸計時互不等待；STOP只停機構，呼吸仍繼續。
+  這次僅交換程式邏輯IN1／IN2定義，保留現有16／17接線；Pin14不可接電動缸，本配置不啟用Wire1，IMU仍用18／19。
+  詳見docs/pwm_breathing.txt；主機回歸不能代替實車速度與電壓量測。
+
+電動缸方向語意（2026-10-15）
+  僅交換程式腳位定義，不修改任何YAML action；邏輯IN1=17／IN2=16。保持目前實體接線，不再交換线材。
+  Extend：Pin17 HIGH、Pin16 LOW；Retract：Pin17 LOW、Pin16 HIGH；Stop：兩腳LOW。
+  HOME2依舊Retract5000ms；目前第二關STEP3 Retract3000ms、STEP5 Extend3000ms，均由原檔執行。
+  Pin14亮度0→55→0，每5ms一階；8-bit解析度保持，理想週期550ms。詳見docs/cylinder_direction.txt。
+
+切關即時方向與復位（2026-10-15）
+  底盤優先pendingStage，在下一個15ms週期換方向；機構activeStage仍等待原有MKS安全屏障。
+  CH7一般模式選關採最近穩定HIGH優先、釋放回退／唯一HIGH與暫時拒收重試，不重播已接受請求。
+  自動復位僅在電缸完整縮回計時>=HOME_RETRACT_MS已完成且LOWLOW／inactive時省略重複5000ms；手動HOME仍完整縮回。
+  返回中新目標不重發MKS或重開缸計時；整體期限與原ACK逾時使故障明確STOP，不能偽造已到位。
+  電動缸17/16維持digitalWrite，Pin14獨立PWM；YAML、輪速預算與互鎖保護保持。詳見docs/stage_switch.txt。
+
+新增獨立伺服測試
+  Pin10、Pin11、Pin12已配置為Servo信號輸出，預設各1500us。
+  Web GUI連線Ready後切Debug，三顆各自有角度／緩移時間／發送按鈕。
+  不依賴底盤供電；Bench仍會先完成或略過未接的MKS開機握手。
+  新增伺服沒有外部回授／接線偵測；畫面顯示的是命令值。
+
+CH4 第一關 Pin2 即時微調（2026-10-15）
+  CH4旋鈕1000..2000us映射±150us；1500us中心、1470..1530us死區。
+  僅在第一關實際啟用且CH7第一關情境時生效，STEP執行／完成保持都可調。
+  基準YAML／緩移／PREV快照不含偏移；最終輸出為基準+偏移並限在500..2500us。
+  切關／CH7LOW退出／HOME／斷線／無效搖桿／STOP時撤除；HOME後等下一個第一關動作才恢復。
+  Bench下不要求ODrive連線；無效CH4只歸零微調，不使底盤搖桿三軸失效。
+  GUI「第一關 Pin2 微調」唯讀面板顯示CH4、要求偏移、實際偏移、基準與輸出指令值。
+  include/system_config.h中SystemConfig::Rc::STAGE1_TRIM_*可調通道、中心、死區、最大偏移與輸出限制。
+  重新燒錄，將CH4旋鈕置中，重啟GUI、重新整理頁面後使用。
+  詳細規格與操作見docs/stage1_trim.txt。
+
+電動缸上電保持STOP（2026-10-15）
+  確認硬體仍為XY-160D電動缸；早期接管先要求16／17兩路LOW；機構begin再啟動受控Retract5000ms開機縮回，沒有自動伸出指令。
+  Teensy4.x的startup_middle_hook在USB啟動等待前即preparePins()，setup最前面再確認LOW/LOW，
+  機構begin仍保留相同初始化，避免單獨測試模組時遺漏。
+  先清除實際GPIO輸出暫存器，再設OUTPUT，降低暖重啟保留舊HIGH造成短脈衝的可能。
+  方向定義、HOME2縮回、deadtime、Pin14PWM、YAML及CH4微調不變。
+  這是提前軟體接管；Teensy未供電／Bootloader／韌體尚未執行前不能由程式保證低電位，
+  若仍上電瞬動，應確認控制線16與17各有硬體下拉且與驅動模組共地。
+  詳細排查及來源見docs/cylinder_startup.txt。

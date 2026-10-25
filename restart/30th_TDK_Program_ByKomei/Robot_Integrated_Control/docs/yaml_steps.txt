@@ -1,0 +1,159 @@
+TDK YAML 操作說明（2026-10-14）— Robot_Integrated_Control
+
+檯面單關獨立測試（目前預設開啟）
+  SystemConfig::BENCH_TEST_MODE=true；修改include/system_config.h的預設值後Build／Upload生效。
+  遙控器必須連線、搖桿通道有效且未全車STOP；機構選關／NEXT／PREV不要求ODrive在線或state8。
+  底盤自身仍維持四輪健康、置中500ms及15ms排程；缺ODrive時保持LOCKED、輪速0，不等於機構鎖住。
+  每顆MKS開機8C／83／F3／92無有效ACK達10秒，記錄Bench warning並標記offline／unreferenced後略過。
+  CAN無法排入亦於500ms略過，避免整條匯流排無電時卡死；不因這些開機缺回報觸發全車STOP。
+  僅在線且已建立零點的軸執行FE；離線／未參考軸的STEP、PREV、HOME及回程略過、不等ACK。
+  .active只表示正在運動，與新增.online分開，閒置但在線的馬達不會被誤判為離線。
+  ID6在線時仍開機91尋零；若10秒沒有開始回報，先盡力停止該軸再略過；已開始後無完成仍真故障STOP。
+  ACK0、運動拒絕、已在線運動失去回報、PWM初始化失敗及操作者STOP保持原保護。
+  status新增bench_test_mode、motor_online_mask及motor_offline_mask，bit0／1／2為ID4／5／6；零點用position_known_mask。
+  online是開機通訊確認，不是MKS心跳或持續線路偵測；offline需重啟重新檢查，遲到ACK不使軸自動加入。
+  第二關無MKS，GPIO電動缸與Pin4／6／9仍照原HOME2與六段流程；GPIO／PWM沒有接線自動偵測。
+  回到比賽互鎖時把BENCH_TEST_MODE改false並重新Build／Upload；主機回歸另外驗證true與false兩路。
+  單關測試接線、等待與判讀見docs/bench_test.txt。
+
+編輯與生效
+  根目錄支援五個關卡與第一關五個道具：Build產生九份實際profile標頭與一份舊Stage1相容標頭。
+  修改 YAML、Build／Upload 後成為開機內建表；只儲存檔案不會改正在使用的 RAM。
+  GUI立即套用可免重新燒錄；完整驗證／commit後才交換有效表，重啟回到韌體內建設定。
+  本版firmware_revision="bench-test-v7"。
+  選關先完成目前關卡復位／Park；第二關於尚未完成整段縮回時才自動HOME2縮回待機，其他新關直接Ready／STEP0；不自動STEP1。
+  普通選關離第一／四關FE回ID6=0，離第二關HOME2縮回；第三關切往任何關均FE4/5=0/0、320RPM／ACC0、Pin3=2250。
+  回程範圍為舊有效profile全部致動器加標準群組；自訂跨關馬達FE回0、舵機回配置初始值。
+  phase=return_wait表示舊關復位中；純MKS／伺服STEP保留完整當段屏障；有電動缸時切關立即LOW/LOW並取消未派發舊缸動作。
+  同關Ready重選不動；新關實際進入快照作PREV基線，第三關再次進入正常保留Park0，不再額外HOME。
+  RAM commit含同關新表先完成舊關回程／Park，再交換新表，Bridge等待Ready與新版本才確認。
+  Bridge最多60秒等待復位、交換及第二關入關HOME2；return_wait／home_wait不能標記套用成功，abort保留舊表並繼續已開始回程。
+
+  不要手改生成標頭：.pio/build/<board>/generated/及include/stage1_basket/chicken/bird.generated.h。
+  三份include快照由Build前與host-test生成器更新，與對應YAML一致，不另維護手寫動作表。
+
+開機坐標與致動器
+  啟用三顆MKS ID4、5、6、六顆PWM Pin2、3、4、5、6、9及XY-160D電動缸Pin16／17；ID7已移除。
+  待機脈寬依序1150、2250、2000、2100、1400、1100 us；Pin3為第三關稻草卷夾爪。
+  各ID依序8C→83工作電流→F3並確認ACK後才建立坐標；開機不自動執行任何關卡STEP。
+  ID4/5不執行91尋原點；各發92 Set Current Axis zero，在不轉動下真正建立驅動器FE原位零點。
+  各92成功ACK後才把該軸標記已知位置，不是只把軟體position欄位改為0。
+  STARTUP_RETURN_ZERO=true：僅ID6發91尋原點，沿用驅動器既有HM設定。
+  ID6收到開始01→完成02才完成；全接線時三軸坐標確認後Ready；Bench略過未接軸，不等待ID7。
+  position_known_mask：bit0=ID4、bit1=ID5、bit2=ID6；三軸確認後為7。
+  開機0；4/5原位零點確認後3；ID6尋零完成後為7。
+  未確認的軸GUI顯示「尚未確認位置」；已確認仍只顯示最近完成目標，不是編碼器實測位置。
+  手動HOME第三關以FE將4/5回0、Pin3回2250；使用開機原位，禁止對4/5發91。
+  手動HOME第一／四關以91尋ID6並設Pin2=1150、Pin5=2100；HOME2電動缸縮回5000ms並設4/6/9=2000/1400/1100。
+  Debug ID4/5/6皆可FE點動；GoHome91只允許ID6。電動缸另提供伸出／縮回／停止及毫秒設定。
+  8C/83/F3/92每500ms非阻塞重試，每顆每種設定各固定10秒ACK上限；明確拒絕仍立即Fault；Bench單純缺ACK／CAN入列逾時則略過。
+  91/FE運動不因缺回覆而重送；92回覆依開機zero_queue/zero_wait診斷。
+  91是尋原點、92是在目前位置建立零點、80才是校正；本版不自動發80。
+  CAN1仍1Mbps；開機83設4/5=3000mA、6=5200mA，模式、HM與限位設定沿用既有配置。
+
+第二關：XY-160D 電動缸與 stage2_steps.yaml
+  第二關已移除MKS ID7；XY-160D MOTOR1接電動缸動力線，邏輯IN1=Pin17、IN2=Pin16，模組與Teensy共地。
+  Extend輸出HIGH/LOW；Retract輸出LOW/HIGH；Stop輸出LOW/LOW。程式不輸出HIGH/HIGH。
+  開機先LOW/LOW，再受控Retract5000ms，與MKS初始化並行；完整縮回計時已完成時，切入第二關僅設定Pin4/6/9=2000/1400/1100，不重等5秒。
+  phase=home_wait、STEP0，計時結束後LOW/LOW並Ready，首次NEXT才開始STEP1。
+  STEP1：僅Pin9=1800、Pin4=1300平行，電動缸保持。
+  STEP2：平行Pin9=1000、Pin4=2100；STEP3：縮回3000ms。
+  STEP4：Pin6緩移1000ms至550us、等待1000ms、再緩移1000ms至1400us。
+  STEP5：伸出3000ms；STEP6：Pin4=2000／Pin9=1100平行緩移1000ms。
+  repeat_from=2：首次1→2→3→4，後續2→3→4循環；RUN跑全表一次。
+  HOME2及離第二關復位均安全縮回5000ms並恢復待機舵機；不發ID7 CAN或91。
+  每次開始伸縮前保持LOW/LOW 50ms，運行秒數從實際輸出HIGH開始計算，定時完成自動Stop。
+  切關立即取消當前／尚未派發的舊電動缸動作，先LOW/LOW，再依安全回程重新縮回。
+  已送出的其他MKS與舵機運動仍等待完成屏障；不影響15ms底盤排程。
+  電動缸無外部限位回讀：計時完成不等於Teensy已感測到位，內置微動開關由電動缸本身斷路。
+  PREV僅以先前完成的伸／縮計時姿態重新運轉預設6000ms；未知或中斷姿態只Stop，不假設脈衝座標。
+  新RAM commit先舊關復位再交換表；Stage2另完成入關HOME2，Bridge確認Ready後才回報成功。
+
+第三關：現行 stage3_steps.yaml 是動作來源
+  目前磁碟為4段、repeat_from=2，控制ID4/5與Pin3；各STEP位置、rpm、acc與脈寬以該檔為準。
+  現場STEP調參與固定離關Park0分開；不以舊版座標或Pin3脈寬覆蓋使用者YAML。
+  首輪1→2→3→4，之後2→3→4循環；每段等待雙軸開始／完成回報與伺服指令屏障。
+  切往任何關先FE ID4=0、ID5=0，320RPM／ACC0、Pin3=2250；雙軸完成後才切目的Ready／STEP0。
+  普通busy等完整當前STEP完成再回程，只保留最新目的；新關不HOME或自動STEP。
+  初次開機入關基線0；正常再次入關為已完成的Park0，PREV以本次實際進入快照為準。
+  手動HOME3仍FE回0/0與Pin3=2250；ID4/5在開機、切關或手動HOME皆不發91。
+
+現行YAML與範例來源
+  完整第二／第三關範例直接開啟根目錄stage2_steps.yaml、stage3_steps.yaml，或在Web關卡選單載入。
+  現行第二關含parallel、servo、cylinder與delay，第三關含雙步進＋Pin3 parallel。
+  pulse_us與duration_ms屬STEP設定；待機值在system_config.h，Pin9待機1100不會改掉STEP中1800。
+  每個parallel生成後都有waitAll；展開後Action數由generate_steps.py／Build計算，不固定沿用舊快照。
+
+根層與動作格式
+  stage：1..5，省略保留舊預設4；prop僅stage1允許1..5；repeat_from：1..STEP數，省略1。
+  第一關NEXT到末段後停止；一般關卡NEXT最後一段後回repeat_from；RUN只跑全部一次，不自動HOME。
+  steps：1..254段，每段 actions：1..256項，展開後每關最多 512 個 Action。
+  stepper：node僅允許4、5、6（省略預設6）；position=-8388608..8388607絕對脈衝，rpm=1..3000，acc=0..255。
+  servo：pin允許2、3、4、5、6、9；pulse_us=500..2500，duration_ms=0..60000（預設0）。
+    duration>0 採線性緩移；完成表示輸出與計時完成，沒有舵機位置感測。
+  delay：ms=0..60000，等待不阻塞控制器；0不等待。
+  cylinder：action=extend／retract／stop；duration_ms=1..60000（運動），Stop允許0..60000；預設運動6000、Stop0。
+  parallel：1..10個不同致動器，接受stepper／cylinder／servo，不能重複同node／同pin／電動缸，也不接受巢狀parallel／delay。
+    展開先派步進、再派電動缸及伺服，最後waitAll；等步進回報、缸計時及舵機緩移完成。
+    同動指相近排程時點派發，沒有保證機械在同一微秒啟動。
+
+驗證與協定
+  拒絕未知欄位、重複YAML鍵、無效腳位／ID、bool當整數、同組重複致動器及容量超限。
+  接受 UTF-8/BOM、註解、flow mapping；使用安全Loader，不建構任意物件。
+  YAML 驗證失敗中止Build，不以過期表悄悄繼續。
+  原RAM action維持10欄、node末欄；Cylinder kind=4使用11欄，末欄cylinderAct：Stop0／Extend1／Retract2，node=0。
+  Stage2/3/4 生成表使用 MechanismConfig 公共型別；helper明確限定namespace，避免Arduino delay撞名。
+  測試：test/test_generate_steps.py；GUI與RAM：test/test_web_gui.py；整套：test/run_tests.ps1。
+
+第一關：五道具獨立流程
+  CH7 HIGH進入第一關Ready／STEP0；MID保持先前模式，LOW退出尋零並固定返回第四關。
+  HIGH模式中CH10／11／12／13／14觸發竹籃／花瓶／竹筒／雞／小鳥，直接執行STEP1。
+  每份stage1_<道具>.yaml含stage:1和prop:1..5，各自編輯、生成、RAM保留，不互相覆寫。
+  竹籃stage1_basket.yaml：3段；第一段ID6=8000 RPM1000 ACC230、Pin5=2056、Pin2=1650；NEXT第二段Pin2緩移1000ms至2100後ID6=3000 RPM500 ACC150；第三段Pin2緩移1000ms至1300。
+  花瓶stage1_vase.yaml：3段；第一段ID6=8000 RPM1000 ACC230，Pin5=2056、Pin2=1833；
+    NEXT第二段Pin2=2111；再NEXT第三段ID6=1000 RPM1000 ACC245、Pin2=1389。
+  竹筒stage1_tube.yaml：2段；第一段ID6=8000 RPM1000 ACC230，Pin5=2056、Pin2=1667；
+    NEXT第二段ID6=0 RPM1000 ACC255。
+  雞stage1_chicken.yaml：4段；第一段ID6=8300 RPM2000 ACC0、Pin5=1833、Pin2=1611；第二段Pin2=900；第三段ID6=2000 RPM320 ACC5；第四段Pin2=1667（105度放爪）。
+  小鳥stage1_bird.yaml：4段；第一段ID6=7900 RPM1000 ACC230、Pin5=1944、Pin2=1611；第二段Pin2=1056；第三段ID6=4000 RPM1500 ACC255；第四段Pin2=1667（105度放爪）。
+  動作中道具按鍵不排隊，須Ready後放開再按；同時觸發多個道具會拒收。
+  最後一段完成後NEXT停止；重新觸發道具可從STEP1再開始，PREV仍可恢復上一段狀態。
+  LOW等待目前整段完成，再ID6用91尋原點、Pin2=1150／Pin5=2100，完成後第四關Ready／STEP0。
+  退出尋零中一般選關可更新最新目標；MID不新增動作，已接受的動作／尋零仍正常完成。
+  切換HIGH／LOW時保持按下的共享通道不會被當成新模式命令，先放開再按。
+  開機MID不選動作；初始LOW可辨識唯一保持HIGH的一般選關，HIGH入關不自動夾任何道具。
+  舊stage1_steps.yaml只保留花瓶三段相容表；開機實際道具來源為五份stage1_<道具>.yaml。
+
+第一關 YAML 身份與 RAM
+  stage:1時prop可為1..5，分別竹籃／花瓶／竹筒／雞／小鳥；其他stage禁止prop。
+  第一關流程以trigger後NEXT逐段完成，末段不循環；一般關卡repeat_from照常，stage5預設delay0。
+  GUI鍵1_1～1_5對應stage1／prop1～5；2～5對應一般關卡。legacy鍵1相容到花瓶1_2。
+  串口stage <stage> [prop]只選流程並保持STEP0；prop <1..5>在第一關Ready直接執行第一段。
+  plan.begin steps actions stage repeat_from [prop]允許分別修改九份RAM表，互不覆蓋。
+  stage1.exit [2..5]讓第一關尋零後交接；RC LOW固定傳4，退出期間仍可保留最新一般選關。
+  status prop／pending_prop／prop_complete與stage／pending_stage合併識別流程。
+
+第一關目前現場調參（2026-10-14）
+  竹籃第二段先Pin2緩移1000ms至2100，完成後FE6到3000（RPM500／ACC150）；第三段Pin2緩移1000ms至1300。
+  雞第三段FE6到2000（RPM320／ACC5），小鳥第三段FE6到4000（RPM1500／ACC255）；Pin2分別保持900／1056，第四段再寫1667放爪。
+  105度以500+(105/180*2000)四捨五入為1667us；第三段等待步進完成後，操作者再按NEXT才進第四段。
+  不合併平行放爪，PREV仍恢復上一段完成狀態；最後一段後NEXT停止，道具重新觸發才再由STEP1開始。
+
+Pin14呼吸PWM與方向修正（2026-10-15）
+  電動缸邏輯IN1=Pin17、IN2=Pin16，Pin14專用於0→55→0的8-bit呼吸PWM，每5ms變動一階。
+  PwmController以begin／poll非阻塞排程，與15ms底盤CAN及舵機／電動缸計時互不等待；STOP只停機構，呼吸仍繼續。
+  這次僅交換程式邏輯IN1／IN2定義，保留現有16／17接線；Pin14不可接電動缸，本配置不啟用Wire1，IMU仍用18／19。
+  詳見docs/pwm_breathing.txt；主機回歸不能代替實車速度與電壓量測。
+
+電動缸方向語意（2026-10-15）
+  僅交換程式腳位定義，不修改任何YAML action；邏輯IN1=17／IN2=16。保持目前實體接線，不再交換线材。
+  Extend：Pin17 HIGH、Pin16 LOW；Retract：Pin17 LOW、Pin16 HIGH；Stop：兩腳LOW。
+  HOME2依舊Retract5000ms；目前第二關STEP3 Retract3000ms、STEP5 Extend3000ms，均由原檔執行。
+  Pin14亮度0→55→0，每5ms一階；8-bit解析度保持，理想週期550ms。詳見docs/cylinder_direction.txt。
+
+切關即時方向與復位（2026-10-15）
+  底盤優先pendingStage，在下一個15ms週期換方向；機構activeStage仍等待原有MKS安全屏障。
+  CH7一般模式選關採最近穩定HIGH優先、釋放回退／唯一HIGH與暫時拒收重試，不重播已接受請求。
+  自動復位僅在電缸完整縮回計時>=HOME_RETRACT_MS已完成且LOWLOW／inactive時省略重複5000ms；手動HOME仍完整縮回。
+  返回中新目標不重發MKS或重開缸計時；整體期限與原ACK逾時使故障明確STOP，不能偽造已到位。
+  電動缸17/16維持digitalWrite，Pin14獨立PWM；YAML、輪速預算與互鎖保護保持。詳見docs/stage_switch.txt。

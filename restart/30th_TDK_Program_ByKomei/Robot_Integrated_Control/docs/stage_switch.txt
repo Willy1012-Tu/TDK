@@ -1,0 +1,53 @@
+Robot_Integrated_Control 切關與即時底盤方向
+2026-10-15
+
+底盤方向
+  輪速混控優先使用已接受的pendingStage，沒有pending才取機構activeStage。
+  接受RC／Web選關後，下一個15ms週期的目標輪速使用新座標系；已送出速度依加減速漸變，無需等待舊機構完成復位。
+  第一關(-S,F)、第二關(-F,-S)、第三／四／五關(F,S)，CH1旋轉與IMU航向補償仍在原車身座標。
+  機構stage仍代表已啟動關卡，不能為了顯示更新而跳過MKS回報；chassis.direction_stage回報有效方向目標。
+  GUI同時顯示機構目前／pending與底盤方向關卡。撤銷／換目標後方向跟著最新已接受目標。
+  四ODrive健康、RC有效、置中解鎖與STOP規則保持，方向更新不解除鎖定。
+
+保持型遙控選關
+  CH7 LOW是一般模式：CH10第二關、CH11第三關暫停、CH12第四關、CH13燈條爆閃、CH14第六關水果；第五關僅Web／Serial。
+  普通選關優先最近穩定LOW→HIGH，按原1700/1600us遲滯和30ms防彈跳判定。
+  選中開關放LOW後，回退到仍HIGH中最近選過者；只剩唯一HIGH必選它。
+  開機只有一個保持HIGH時可直接採用；開機多HIGH且沒有歷史次序則保持歧義，等唯一HIGH或新的穩定上升。
+  同時建立的新上升事件無法判先後時依掃描順序決定，較高通道作平手處理。
+  因初始化、Debug、RAM上傳或競賽底盤互鎖暫時拒絕時，保留目標，條件允許後自動重試。
+  成功接受後不反覆送同一選關，不以固定HIGH覆蓋後續Web請求；新實體選擇變化才再發。
+  CH7 HIGH仍為第一關五道具模式，CH10..14不當普通選關；MID保持先前模式。
+  從第一關LOW退出時，原本按住的共享道具鍵須先穩定LOW再重新HIGH，避免誤選普通關卡。
+  LOW退出仍對在線ID6做91，無新一般選關時回第四關；既有尋零／回程屏障保留。
+  NEXT／PREV仍需Ready後放開再新按，動作中不排隊。
+
+安全復位與期限
+  自動SwitchReturn／EntryHome只有在電缸inactive、兩GPIO為LOW、fullyRetracted=true（整段縮回計時已完成）時略過重複縮回。
+  舵機待機與已發MKS回程仍執行；手動HOME／Debug縮回保持完整設定時長。
+  referenceKnown僅為動作計時方向估計，短縮回也可成立；不能用來判定完整縮回。只有Retract計時>=HOME_RETRACT_MS完整完成才有fullyRetracted；開機先做5000ms完整縮回，被中止／未知位置仍需重新完整縮回。
+  電缸初次通電與換向仍50ms全LOW，完整行程時間自實際HIGH起算；LED PWM不影響此計時。
+  返回已開始時收到新目標只更新pending；不重發正在執行的FE／91，不重啟已開始的縮回計時。
+  複合SwitchStop／SwitchReturn／EntryHome共用130000ms整體期限，retarget不能續期，Ready或故障時解除。
+  此期限兼顧最長60秒自訂已發伺服、30秒步進回程、額外30秒HOME與5秒EntryHome；正常流程不等滿130秒。
+  原MKS開始ACK1500ms、完成ACK30000ms、發送500ms逾時先行生效；它們並未改成130秒。
+  逾時進Fault並STOP，不把未回報／仍可能運動的馬達標為已歸零Ready；未完成軸位置標為未知，遲到ACK不重啟動作。
+
+電動缸與PWM
+  電動缸Pin17／16全部是digitalWrite HIGH/LOW；Extend17HIGH16LOW，Retract17LOW16HIGH，Stop兩LOW。
+  不對Pin16／17做analogWrite、PWM頻率或佔空比控制，XY-160D以數位方向訊號驅動。
+  Pin14開機關燈；一般模式CH13控制0／255爆閃，每50ms切換。GUI可調手動呼吸，預設峰值55／每階5ms；STOP後燈光仍獨立運行。
+  三MKS4/5/6、CAN1/2一Mbps、六顆舵機及90+25<=115輪速預算保持。
+  所有stage*.yaml不改；新行為由控制器調度完成。
+
+驗證
+  主機回歸：recent-high／fallback／startup-held／blocked-retry／invalid／context guard，pending方向與15ms底盤，
+  已縮回略過、未知縮回、retarget不重啟、ACK屏障、整體期限回繞／Fault／STOP與PWMGUI相容性。
+  test/run_tests.ps1及兩板tools/compile.ps1結果見docs/verification.txt；未自動燒錄或連接實車。
+
+CH14 繞境獨立底盤設定（2026-10-15）
+  CH7 LOW時，CH14選擇繞境參數：加速90／減速180、輪距260／320、X120、左Y+180／右Y-180。
+  方向與CH10第二關相同(-F,-S)，不切機構關卡，也不自動發出機構回位／尋零指令。
+  與CH10..13共用最近HIGH優先／釋放回退；CH7 HIGH時CH14仍是第一關夾小鳥。
+  GUI標示目前參數庫，兩份RAM設定各自保留；寫入附模式編號，切換模式會清除未套用草稿。
+  重新燒錄、重啟GUI並重新整理網頁後使用。完整參數／指令見docs/chassis_motion.txt。

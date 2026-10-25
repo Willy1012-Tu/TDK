@@ -1,0 +1,197 @@
+全車鎖定、機構故障與IMU降級（目前版本：bench-test-v7）
+
+檯面單關獨立測試（目前預設開啟）
+  SystemConfig::BENCH_TEST_MODE=true；修改include/system_config.h的預設值後Build／Upload生效。
+  遙控器必須連線、搖桿通道有效且未全車STOP；機構選關／NEXT／PREV不要求ODrive在線或state8。
+  底盤自身仍維持四輪健康、置中500ms及15ms排程；缺ODrive時保持LOCKED、輪速0，不等於機構鎖住。
+  每顆MKS開機8C／83／F3／92無有效ACK達10秒，記錄Bench warning並標記offline／unreferenced後略過。
+  CAN無法排入亦於500ms略過，避免整條匯流排無電時卡死；不因這些開機缺回報觸發全車STOP。
+  僅在線且已建立零點的軸執行FE；離線／未參考軸的STEP、PREV、HOME及回程略過、不等ACK。
+  .active只表示正在運動，與新增.online分開，閒置但在線的馬達不會被誤判為離線。
+  ID6在線時仍開機91尋零；若10秒沒有開始回報，先盡力停止該軸再略過；已開始後無完成仍真故障STOP。
+  ACK0、運動拒絕、已在線運動失去回報、PWM初始化失敗及操作者STOP保持原保護。
+  status新增bench_test_mode、motor_online_mask及motor_offline_mask，bit0／1／2為ID4／5／6；零點用position_known_mask。
+  online是開機通訊確認，不是MKS心跳或持續線路偵測；offline需重啟重新檢查，遲到ACK不使軸自動加入。
+  第二關無MKS，GPIO電動缸與Pin4／6／9仍照原HOME2與六段流程；GPIO／PWM沒有接線自動偵測。
+  回到比賽互鎖時把BENCH_TEST_MODE改false並重新Build／Upload；主機回歸另外驗證true與false兩路。
+  單關測試接線、等待與判讀見docs/bench_test.txt。
+
+2026-10-14 第一關道具模式與五關選擇（現行）
+  CH2為前後輸入、CH3為平移輸入、CH1自轉；CH4空閒，車身方向依實際關卡對照。
+  CH7三段撥桿：HIGH>1700進第一關專屬模式；LOW<1300退出；MID1300..1700維持先前模式、不發切換事件。
+  CH7初始MID不建立模式、不觸發道具或普通選關；無效值顯示switch_position=255並解除按鍵狀態。
+  HIGH只選第一關Ready／STEP0，不立即執行道具；初次預設花瓶prop=2，同關可保留既有道具。
+  第一關模式：CH10竹籃prop1三段、CH11花瓶prop2三段、CH12竹筒prop3兩段、CH13雞prop4四段、CH14小鳥prop5四段。
+  新道具鍵先釋放並按下，30ms防彈跳後直接執行對應STEP1；之後CH6逐段NEXT，末段完成後不循環重跑。
+  道具鍵忙碌時不排隊；同時按下多個道具鍵全部拒絕，須重新釋放再按。
+  LOW模式：CH10第二關、CH11第三關暫停、CH12第四關、CH13燈條爆閃、CH14第六關水果；第五關保留Web／Serial備用待機。
+  首次開機LOW可接納唯一保持高位的普通選關；模式轉換時已保持的鍵不能被重新解讀，須釋放再按。
+  普通選關忙碌時保留最新目標；最近穩定HIGH優先，釋放後回退到仍HIGH者，暫時拒收保留重試。
+  LOW退出第一關先等當前整段完成，再91尋ID6、Pin2=1150／Pin5=2100；沒有新普通選關時固定回第四關STEP0。
+  尋零開始後phase=home_wait，stage仍第一關、pending_stage是目的；91開始／完成ACK都確認後才Ready。
+  退出途中新的普通選關可更新目的，不能跳過91屏障；普通HOME／開機尋零與全車STOP規則不變。
+  CH5 PREV、CH6 NEXT仍需先釋放後新按，動作中不排隊；模式轉換或新選關會解除舊導航按鍵。
+  CH9只清四顆ODrive錯誤，不解除全車STOP或MKS Fault；CH1手動旋轉優先與200ms重新鎖航向維持原邏輯。
+  本版以USB firmware_revision的bench-test-v7識別；編譯後仍須另行燒錄才會在硬體執行。
+
+各關方向對照與生效時點
+  F=CH2按FORWARD校正／死區後的前後量；S=CH3按STRAFE校正／死區後的平移量。
+  第一關：(車身前後,車身平移)=(-S,F)；第二關=(-F,-S)；第三／四／五關=(F,S)。
+  先校正原輸入再交換／翻轉軸，避免把CH2／CH3不同中立點與行程套錯；CH1旋轉量始終不變。
+  每15ms輪速發送優先取已接受的pendingStage，沒有pending才取activeStage；chassis.direction_stage回報有效方向。
+  舊關STEP、return_wait或第一關退出home_wait期間，底盤已用目標關方向；機構stage仍待安全屏障完成才交接。
+  切關不增加零桿等待或鎖定流程；平移方向在新目標接受後的下一個15ms週期改變，既有解鎖與故障條件保留。
+
+普通底盤鎖定
+  ELRS失聯、無效搖桿資料、ODrive心跳超過500ms、error非0或不在CLOSED_LOOP時，
+  停止四輪並要求IDLE，不接受新的RC機構按鍵。
+  通訊恢復、四輪健康且IDLE，搖桿持續置中500ms才重新解鎖。
+  CH9清錯只送ODrive0x18；以下次實際心跳確認錯誤是否消失。LOW模式CH11現在選第三關；HIGH模式CH11触發花瓶。
+  GUI可在底盤鎖定／未接遙控時調試機構。
+
+全車STOP鎖存
+  GUI、@req stop、純文字stop或機構致命故障皆呼叫同一SystemSafety。
+  ODrive四輪速度0及IDLE；MKS ID4/5/6各送F7及F3=0，未接受的停止指令繼續有限排程重試。
+  六顆伺服取消緩移並detach，PWM停止；氣缸Pin16／17立即LOW／LOW，先於CAN停止指令的重試。
+  軟體不切斷外部電源；實體急停目前直接切電源，MCU沒有急停輸入，無法辨識按下或讀取其狀態。
+  取消待切關、連續动作與RAM交易；須重啟控制板，CH9清錯不解除STOP。
+
+選擇性開機尋零與ACK排查
+  CAN1、CAN2均1Mbps。MOTOR_IDS={4,5,6}；開機設定依ID順序逐項等待ACK：
+  ID4：8C 01 01→83工作電流3000mA→F3 01；ID5：8C 01 01→83工作電流3000mA→F3 01。
+  ID6：8C 01 01→83工作電流5200mA→F3 01；ID7已移除，不初始化、啟用、尋零、點動或STOP發送。
+  三軸83均位於該軸8C成功ACK之後、F3之前；ACK1才確認保存並接續。
+  所有設定確認後，ID4/5各發92：Makerbase的Set Current Axis to zero，原地建立驅動器FE零點、不轉動馬達。
+  必須收到92 ACK1才建立position4/5=0及known bits0/1；軟體宣告0不能代替驅動器確認。
+  只有ID6會發91 GoHome，依HM參數尋零；等待開始ACK1／完成ACK2才Ready。
+  開機無FE、FD或91至ID4/5；氣缸只初始化LOW／LOW，不自動伸縮。
+  8C/83/F3/92設定每500ms可非阻塞重試，第一次成功入列起固定10秒總期限；每ID／指令各自計時，重送不延長。
+  83 ACK2為未保存成功，本版不視為保存確認；保持等待／重試，不能提前啟用或尋零。
+  ACK0立即停止；91／FE成功排入CAN後不重送，開始1500ms／完成30000ms逾時則STOP。
+  500ms CAN enqueue timeout代表無法入列；ACK timeout代表已入列但沒有有效回覆。
+  startup_phase：boot_delay、feedback_queue/wait、current_queue/wait、enable_queue/wait、zero_queue/wait、home_queue/wait、ready、fault。
+  startup_node/command/attempts與notice指出目前ID、命令與已入列次數；十進位140=8C、131=83、243=F3、146=92、145=91。
+  先看phase=fault；83拒絕或逾時時，notice含ID、0x83、目標mA與attempt，故障鎖存並停止全部馬達。
+  startup_current_ma為目前／保留的83命令目標，其他startup_command時為0；並非實測值。
+  current4_ma/current5_ma/current6_ma在本次各83 ACK1前為0，確認後依序為3000/3000/5200；故障後保留不代表馬達仍啟用。
+  current_configured_mask：bit0/1/2=ID4/5/6，0→1→3→7；與位置遮罩獨立，電流mask=7不代表尋零已完成。
+  position_known_mask bits0/1/2固定對應ID4/5/6；開機0→92確認後3→ID6的91完成確認7。
+  只有實際完成／零點ACK才更新確認位置；中途停止後position欄位不代表即時位置。
+  每次開機重送三軸83 working current（面板Ma）：ID4/5=3000mA、ID6=5200mA；不是HM_Ma或HoldMa。
+  不自動修改驅動器WorkMode、HM方向、速度、限位設定或校正參數。
+  錯誤ID、匯流排、遠端/延伸幀、checksum錯誤及未開始即完成的91/FE幀皆忽略。
+
+切關復位、第三關Park與手動HOME
+  普通選關先完成舊關FE／待機復位，再切目的關STEP0；第二關進入時另執行氣缸HOME2縮回5000ms，完成才Ready。
+  CH7 LOW是第一關退出特例：等待當前段完成後91尋ID6，再切目的關；未改選則固定第四關。
+  第五關內建／HOME無致動器；自訂RAM若用了硬體，離關仍按其實際使用群組復位。
+  第一／四關離關FE回ID6=0，Pin2=1150／Pin5=2100；第二關離關氣缸縮回5000ms，Pin4/6/9=2000/1400/1100。
+  第三關離關Park0：FE ID4=0／ID5=0，320RPM／ACC0、Pin3=2250；切往任何關都等待雙軸完成，禁止91。
+  回程取目前profile所有致動器與標準群組的聯集；其他自訂馬達FE回0、PWM回配置初始值，使用氣缸的profile亦縮回5000ms。
+  回程phase=return_wait，stage仍舊關、pending_stage保留最新目的；WaitAll完成才交換關卡。
+  純MKS／伺服STEP或RUN忙碌時保留最新選關，等整段完成再回程；有待切請求時RUN不繼續後續STEP。
+  若氣缸正動作或舊段尚有未執行氣缸Action，接受不同profile後立即LOW／LOW中止該段。
+  已發MKS與伺服緩移仍等既有WaitAll／deadline；未派發的舊段Cylinder／Delay／Servo後續Action捨棄，再執行舊關回程。
+  NEXT／PREV仍不排隊；同一profile Ready重選不動，回程中選回原關仍完整回程後回原關STEP0。
+  純MKS／伺服回程尚未開始時可取消待切；已中斷的氣缸段不能恢復執行，仍完成復位。
+  RAM上傳／pendingCommit交易中拒收改選。
+  第三關首次進入基線為開機0，再次進入不發動作，正常保留上次Park0回零姿態。
+  PREV回本次進入的實際快照；跨關RAM或Debug曾更改位置時不能假設基線為0或固定Park。
+  第一／四關共用ID6和Pin2/5，前關復位後擷取完成的待機狀態作新關基線。
+  手動HOME1/4才91尋ID6；HOME2為氣缸縮回5000ms及伺服待機，不發MKS HOME。
+  手動HOME3仍FE到0/0、Pin3=2250，不發91；HOME5內建待機無硬體動作。
+  手動HOME phase=home_wait且步驟0；若有待切，完成HOME後舊關回程，再切新關Ready，不尋新關原點。
+  STAGE3_ENABLED=true；LOW模式CH11／Web選第三關後NEXT第一按才STEP1，repeat_from=2，動作內容以現行YAML為準。
+  RAM commit包含同關新表都先舊關回程／Park，完成後才install版本新表及Ready；return_wait不表示commit完成。
+  Bridge以Ready、新版本、runtime_plan、目的stage及prop、非uploading確認；60秒等待回程、第二關入關縮回與RAM交換。
+  status新增prop／pending_prop／prop_complete；第一關prop=1..5，其他關0，prop0選擇請求對第一關等同花瓶2。
+  rc.stage1_mode／prop／switch_position表示RC模式／道具請求／CH7位置（LOW0、MID1、HIGH2、非法255）。
+  @req stage <stage> [prop]選profile；@req prop <id>只在第一關Ready觸發STEP1；@req stage1.exit [dest]執行退出尋零。
+  plan.abort只取消未交換的新表，保留舊表／版本；已開始的回程繼續完成，回原關Ready／STEP0。
+  已交換的有效表不由abort回滾；復位拒絕／逾時／TX失敗仍全車STOP。
+  Debug允許ID4/5/6 FE點動；91 GoHome只允許ID6，ID4/5與所有ID7命令直接拒絕。
+  stage1_basket/vase/tube/chicken/bird.yaml分別保存五種流程；stage1_steps.yaml是舊第一關花瓶相容入口。
+  stage5_steps.yaml保存第五關備用流程；Web與plan.begin可指定stage及prop，五個道具RAM表各自保留。
+  各關YAML修改後Build生成內建表，Web可先熱套RAM。
+
+六顆PWM與RAM平行動作
+  SERVO_PINS={2,3,4,5,6,9}；待機脈寬依序1150、2250、2000、2100、1400、1100us。
+  脈寬500..2500us；支持duration_ms，PWM數值是命令，不含實際到位感測。
+  平行／Prev／RAM驗證使用16位致動器遮罩，可含3步進＋6伺服＋1氣缸共10裝置，逐軸完成後放行。
+  一次RAM交易一個profile，最多254STEP／512Action；完整驗證後交換，保留其他profile有效表。
+  九個profile為第一關五道具與第二至第五關；plan.begin可加prop參數，非第一關prop必須0。
+  無效node/pin/24bit坐標/速度/脈寬/時長、重複平行致動器、缺少等待、編號不連續皆拒絕。
+  Upload10秒無下一項即取消，保留舊表；STOP隨時有效。
+
+XY-160D氣缸輸出、安全時間與估計參考
+  原MKS ID7已移除，第二關改用XY-160D MOTOR1：邏輯IN1=Pin17、IN2=Pin16；LOW／LOW停止。
+  Extend=HIGH／LOW，Retract=LOW／HIGH；任何時刻都禁止HIGH／HIGH，不占用PWM Servo腳位。
+  開機先建立LOW輸出鎖存再設OUTPUT；每次新運動含Stop→motion都先LOW／LOW至少50ms。
+  完整duration_ms從實際通電時刻起算；例如6000ms行程最早從接受到完成為6050ms，不把反轉間隔扣掉。
+  使用millis差值與非阻塞deadline，可跨32位時間回繞；CAN、RC、15ms四輪輪速與IMU仍持續服務。
+  第二關入關HOME2：縮回5000ms、Pin4=2000／Pin6=1400／Pin9=1100；完成後Ready／STEP0，NEXT才開始STEP1。
+  STEP1僅Pin9=1800／Pin4=1300平行；STEP2 Pin9=1000／Pin4=2100。
+  STEP3縮回3000ms；STEP4 Pin6先緩移1000ms至550、等待1000ms、再緩移1000ms至1400；STEP5伸出3000ms；STEP6 Pin4=2000／Pin9=1100平行緩移1000ms；repeat_from=2。
+  STEP／平行／HOME／回程有氣缸Active時，NEXT與PREV不能插入；忙碌導航鍵不排隊。
+  STOP與致命故障立即LOW／LOW，即使USB回壓或CAN停止幀需重试亦不等待；全部伺服仍detach。
+  reference_action／reference_known只代表完整定時計算完成的方向估計，沒有行程開關／位置感測，不能保證實際到位。
+  中途停車／取消運動使估計失效；PREV若有有效快照，重做相應方向完整6000ms，未知時維持Stop。
+  CylinderAction：0 Stop、1 Extend、2 Retract；motion時長1..60000ms，Stop可0即停或以LOW／LOW等待指定0..60000ms。
+  debug.cylinder <action> <ms>只在Debug安全狀態使用；RAM ActionKind=4，需在原node欄之後附明確cylinder_action。
+  舊Action種類保留原線上格式；同平行群組重複Cylinder、無效enum／時長會拒絕，保留舊RAM版本。
+  status.cylinder含available、action、active、duration_ms、remaining_ms、in1_pin／in2_pin、in1_high／in2_high、reference_action／reference_known。
+  available=true表示韌體支援，不表示已接模組；remaining_ms是尚未完成的通電時間，50ms切換間隔不計入。
+
+BNO055 與航向補償已移除（2026-10-15）
+  韌體不再初始化或讀取 BNO055，不再占用 SDA18/SCL19 進行 IMU 通訊。
+  底盤只使用遙控器、關卡方向、ICR 與加減速設定；不會自動鎖定或補正航向。
+  正常搖桿輪速上限保留 90 turns/s，防護上限保留 115 turns/s。
+  15ms CAN 速度排程、心跳鎖定、斷線保護、全車 STOP、各關機構與 PWM 功能保留。
+  status 不再提供 imu、yaw、pitch、roll 或 chassis.yaw_compensation；GUI 姿態卡已移除。
+  請同步燒錄新韌體並重新啟動 Web GUI、重新整理網頁。
+
+USB與驗證
+  USB Serial115200；輸入／輸出有每圈上限，不等USB空間、不呼叫Serial.flush。
+  輸出不足拒絕新的非STOP命令（usb_backpressure）；不讀USB仍解析STOP並維持其他排程。
+  @1 status或@1 hello核對firmware_revision="bench-test-v7"、motor_ids、servo_pins。
+  startup_home_ids=[6]、startup_hold_ids=[4,5]；startup_current_settings=[{"node":4,"milliamps":3000},{"node":5,"milliamps":3000},{"node":6,"milliamps":5200}]。
+  電流CAN1標準幀DLC4：ID4=83 0B B8 4A，ID5=83 0B B8 4B，ID6=83 14 50 ED（十六進位，checksum含CAN ID）。
+  詳細電流配置與開機狀態機見docs/startup_current.txt；@req查詢不會重設電流或觸發運動。
+  輪速由 chassis.wheels 與 chassis.motion 回報，無感測器補償。
+  test/run_tests.ps1執行C++、YAML、HTTP、Node及真實serial JSON回歸。
+  正式編譯記錄.pio/logs/teensy40.log與teensy41.log；當前實測見docs/verification.txt。
+  未燒錄和實機確認前，編譯成功不代表硬體已在執行此版本。
+
+官方協定參考
+  Makerbase CAN User Manual V1.0.9，第36頁§5.2.3，83工作電流／保存ACK：
+  https://github.com/makerbase-motor/MKS-SERVO42D-57D/blob/master/User%20Manual/V1.0.9/MKS%20SERVO42%2657D_CAN%20User%20Manual%20V1.0.9.pdf
+  Makerbase CAN User Manual V1.0.6，第30頁，92原地設零：
+  https://github.com/makerbase-motor/MKS-SERVO42D-57D/blob/master/User%20Manual/V1.0.6/MKS%20SERVO42%2657D_CAN%20User%20Manual%20V1.0.6.pdf
+  Bosch BNO055 datasheet：
+  https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bno055-ds000.pdf
+
+Pin14呼吸PWM與方向修正（2026-10-15）
+  電動缸邏輯IN1=Pin17、IN2=Pin16，Pin14專用於0→55→0的8-bit呼吸PWM，每5ms變動一階。
+  PwmController以begin／poll非阻塞排程，與15ms底盤CAN及舵機／電動缸計時互不等待；STOP只停機構，呼吸仍繼續。
+  這次僅交換程式邏輯IN1／IN2定義，保留現有16／17接線；Pin14不可接電動缸，本配置不啟用Wire1，IMU仍用18／19。
+  詳見docs/pwm_breathing.txt；主機回歸不能代替實車速度與電壓量測。
+
+電動缸方向語意（2026-10-15）
+  僅交換程式腳位定義，不修改任何YAML action；邏輯IN1=17／IN2=16。保持目前實體接線，不再交換线材。
+  Extend：Pin17 HIGH、Pin16 LOW；Retract：Pin17 LOW、Pin16 HIGH；Stop：兩腳LOW。
+  HOME2依舊Retract5000ms；目前第二關STEP3 Retract3000ms、STEP5 Extend3000ms，均由原檔執行。
+  Pin14亮度0→55→0，每5ms一階；8-bit解析度保持，理想週期550ms。詳見docs/cylinder_direction.txt。
+
+Pin14呼吸燈GUI（2026-10-15）
+  Normal／Debug共用面板可設定最高亮度0..255（0關閉）與每階間隔1..1000ms（越大越慢）。
+  按套用即改RAM，恢復預設／重啟回55／5ms；初次需燒錄新版，後續調參免燒錄。
+  動作中／開機中／STOP仍可調獨立燈；USB未連接、狀態過期或舊韌體缺pwm能力時停用。
+  狀態回報pwm物件，命令為@req pwm.set <最高亮度> <每階ms>；參數驗證與USB STOP優先規則保留。
+  YAML／電動缸17/16／六舵機／步進與底盤90+25≤115及15ms排程均保持。詳見docs/pwm_gui.txt。
+
+切關即時方向與復位（2026-10-15）
+  底盤優先pendingStage，在下一個15ms週期換方向；機構activeStage仍等待原有MKS安全屏障。
+  CH7一般模式選關採最近穩定HIGH優先、釋放回退／唯一HIGH與暫時拒收重試，不重播已接受請求。
+  自動復位僅在電缸已完成縮回且LOWLOW／inactive／參考有效時省略重複5000ms；手動HOME仍完整縮回。
+  返回中新目標不重發MKS或重開缸計時；整體期限與原ACK逾時使故障明確STOP，不能偽造已到位。
+  電動缸17/16維持digitalWrite，Pin14獨立PWM；YAML、輪速預算與互鎖保護保持。詳見docs/stage_switch.txt。

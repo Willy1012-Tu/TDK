@@ -1,0 +1,77 @@
+# Web GUI 編輯；立即套用至 RAM，或重新 Build / Upload 作為開機預設。
+stage: 2
+repeat_from: 2
+steps:
+- actions:
+  - servo:
+      pin: 3
+      pulse_us: 2250
+      duration_ms: 0
+- actions:
+  - parallel:
+    - servo:
+        pin: 9
+        pulse_us: 1000
+    - servo:
+        pin: 4
+        pulse_us: 2100
+- actions:
+  - cylinder:
+      action: extend
+      duration_ms: 3000
+- actions:
+  - servo:
+      pin: 6
+      pulse_us: 2389
+      duration_ms: 800
+- actions:
+  - servo:
+      pin: 6
+      pulse_us: 1433
+      duration_ms: 500
+- actions:
+  - cylinder:
+      action: retract
+      duration_ms: 3000
+- actions:
+  - parallel:
+    - servo:
+        pin: 9
+        pulse_us: 1800
+    - servo:
+        pin: 4
+        pulse_us: 1300
+- actions:
+  - parallel:
+    - servo:
+        pin: 9
+        pulse_us: 1000
+    - servo:
+        pin: 4
+        pulse_us: 2100
+- actions:
+  - cylinder:
+      action: extend
+      duration_ms: 3000
+- actions:
+  - servo:
+      pin: 6
+      pulse_us: 2389
+      duration_ms: 800
+- actions:
+  - servo:
+      pin: 6
+      pulse_us: 1433
+      duration_ms: 500
+- actions:
+  - cylinder:
+      action: retract
+      duration_ms: 3000
+- actions:
+  - parallel:
+    - servo:
+        pin: 9
+        pulse_us: 1800
+    - servo:
+        pin: 4
+        pulse_us: 1300

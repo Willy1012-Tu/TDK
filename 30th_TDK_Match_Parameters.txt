@@ -1,0 +1,57 @@
+蛤蠣完整STEP 流程
+stage: 2
+repeat_from: 2
+steps:
+  - actions:
+      - parallel:
+          - servo: {pin: 9, pulse_us: 1800}
+          - servo: {pin: 4, pulse_us: 1300}
+  - actions:
+      - parallel:
+          - servo: {pin: 9, pulse_us: 1000}
+          - servo: {pin: 4, pulse_us: 2100}
+  - actions:
+      - cylinder: {action: extend, duration_ms: 3000}
+  - actions:
+      - servo: {pin: 6, pulse_us: 600, duration_ms: 1000}
+  - actions:
+      - servo: {pin: 6, pulse_us: 1400, duration_ms: 1000}
+  - actions:
+      - cylinder: {action: retract, duration_ms: 3000}
+  - actions:
+      - parallel:
+          - servo: {pin: 4, pulse_us: 1300, duration_ms: 1000}
+          - servo: {pin: 9, pulse_us: 1800, duration_ms: 1000}
+
+夾花瓶
+stage: 1
+prop: 2
+repeat_from: 1
+steps:
+  - actions:
+      - parallel:
+          - stepper: {node: 6, position: 8000, rpm: 1000, acc: 230}
+          - servo: {pin: 5, pulse_us: 2056}
+          - servo: {pin: 2, pulse_us: 1833}
+  - actions:
+      - servo: {pin: 2, pulse_us: 2167}
+  - actions:
+      - parallel:
+          - stepper: {node: 6, position: 2000, rpm: 1000, acc: 245}
+          - servo: {pin: 2, pulse_us: 1389}
+  - actions:
+      - parallel:
+          - stepper: {node: 6, position: -1000, rpm: 320, acc: 10}
+          - servo: {pin: 2, pulse_us: 1500, duration_ms: 1000}
+
+
+燒入程式
+cd "C:\Users\User\OneDrive\桌面\TDK30th\restart\30th_TDK_Program_ByKomei\Robot_Integrated_Control"
+powershell -ExecutionPolicy Bypass -File .\tools\pio.ps1 run -e teensy40 -t upload
+
+打開web
+
+架構改成 rtos與狀態機儲存
+並且把每一關切成頁面式 獨立顯示
+並且關掉web情況下step動作 要保存目前的數值在本地
+不要做測試驗證，提升整體執行速度

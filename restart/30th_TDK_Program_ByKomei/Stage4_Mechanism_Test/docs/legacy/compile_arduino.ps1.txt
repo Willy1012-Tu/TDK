@@ -1,0 +1,45 @@
+param(
+    [ValidateSet('teensy40', 'teensy41')][string]$Board = 'teensy41',
+    [string]$ArduinoCli,
+    [string]$ArduinoData = (Join-Path $env:LOCALAPPDATA 'Arduino15')
+)
+$ErrorActionPreference = 'Stop'
+$projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+$sketchPath = Join-Path $projectRoot 'Stage4_Mechanism_Test'
+if (-not $ArduinoCli) {
+    $cliCommand = Get-Command arduino-cli -ErrorAction SilentlyContinue
+    if ($cliCommand) { $ArduinoCli = $cliCommand.Source }
+    else { $ArduinoCli = Join-Path $env:ProgramFiles 'Arduino IDE/resources/app/lib/backend/resources/arduino-cli.exe' }
+}
+if (-not (Test-Path -LiteralPath $ArduinoCli -PathType Leaf)) { throw 'arduino-cli not found; pass -ArduinoCli with its full path.' }
+$installedPackages = Join-Path $ArduinoData 'packages'
+if (-not (Test-Path -LiteralPath (Join-Path $installedPackages 'teensy/hardware/avr'))) {
+    throw 'Teensy board package missing. Install Teensy with Arduino Boards Manager or pass -ArduinoData.'
+}
+foreach ($libraryName in @('FlexCAN_T4', 'TeensyThreads', 'Servo')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $projectRoot "Library/$libraryName"))) { throw "Project library missing: $libraryName" }
+}
+$workPath = Join-Path $projectRoot 'tmp/arduino'
+$dataPath = [IO.Path]::GetFullPath($ArduinoData)
+$userPath = Join-Path $workPath 'sketchbook'
+$downloadPath = Join-Path $workPath 'downloads'
+$buildPath = Join-Path $projectRoot "tmp/stage4-build-$Board"
+foreach ($directory in @($userPath, $downloadPath, $buildPath)) {
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+}
+# Reuse the installed board package directly; CLI may refresh its inventory there.
+$configPath = Join-Path $workPath 'arduino-cli.yaml'
+$configText = @{
+    directories = @{ data = $dataPath; user = $userPath; downloads = $downloadPath }
+    library = @{ enable_unsafe_install = $false }
+} | ConvertTo-Json -Depth 4
+# JSON is valid YAML and safely preserves spaces, backslashes and non-ASCII paths.
+[IO.File]::WriteAllText($configPath, $configText, [Text.UTF8Encoding]::new($false))
+$logPath = Join-Path $buildPath 'compile.log'
+$previousErrorPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+& $ArduinoCli compile --config-file $configPath --fqbn "teensy:avr:$Board" --libraries (Join-Path $projectRoot 'Library') --build-path $buildPath --warnings all $sketchPath 2>&1 | Tee-Object -FilePath $logPath
+$compileExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorPreference
+if ($compileExitCode -ne 0) { throw "Compile failed; see $logPath" }
+Write-Host "Compiled $Board. Build output: $buildPath"

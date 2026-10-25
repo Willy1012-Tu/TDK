@@ -1,0 +1,47 @@
+Robot_Integrated_Control GUI呼吸燈調整
+2026-10-15 / Pin14 / firmware_revision=bench-test-v7
+
+使用方式
+  新版韌體先Build／Upload一次，再用tools/start_web_gui.ps1啟動GUI並連接Teensy。
+  在Normal／Debug共用的Pin14呼吸燈面板調整最高亮度與每階間隔，按套用即刻改RAM設定。
+  最高亮度0..255，0關燈；每階間隔1..1000ms，數字越大越慢。
+  輸入或拖滑桿只編輯欄位；按套用才傳送，背景狀態更新不覆蓋尚未套用的輸入。
+  面板顯示目前PWM命令與預估完整呼吸週期；週期=2×最高亮度×每階間隔。
+  例如最高55、間隔5ms為550ms一輪；55、20ms為2200ms一輪；最高0顯示關閉。
+  恢復預設會套用韌體回報的開機預設，目前55／5ms；重啟Teensy亦回復55／5ms。
+  調參只存RAM，不改YAML或system_config.h、不寫EEPROM；後續每次調整無需重新燒錄。
+  控制器執行機構動作、開機初始化或全車STOP時仍可調呼吸燈，這不解鎖馬達。
+  USB未連接、狀態過期或舊韌體缺pwm能力時控件停用；舊韌體需更新，禁止悄悄忽略設定。
+
+韌體與介面責任
+  PwmController::configure驗證最高0..255／間隔1..1000；無效參數不修改輸出、方向與時鐘。
+  降低上限時立即把當前PWM限於新上限；最高0立即輸出0，恢復正值後由0繼續呼吸。
+  同值套用保持目前相位；新設定重設下一階計時，不補發延遲階數。
+  begin恢復開機常數；poll每次至多一步，millis回繞安全，無delay與等待迴圈。
+  main排程不新增模組；既有Pwm begin／poll、15ms底盤CAN、Cylinder16／17及六舵機維持分工。
+  Web Bridge先驗證payload、連接與新鮮pwm能力，再發序列命令；ACK後取實際狀態回報GUI。
+  GUI只操作呼吸燈，沒有新增步進／舵機／電動缸或關卡動作。
+
+序列埠
+  @1 pwm.set 55 5
+  @2 pwm.set 0 5
+  @3 status
+  pwm.set參數是整數最高亮度與整數每階ms，亮度0..255、間隔1..1000。
+  status新增pwm.available、pin、value、max_value、step_interval_ms、default_max_value、default_step_interval_ms、min_step_interval_ms、max_step_interval_ms。
+  current value是最近analogWrite命令，不是電壓／光感實測值；呼吸速度不是PWM載波頻率。
+  USB背壓拒收新非STOP命令的規則保持；全車STOP優先，不停獨立呼吸燈。
+
+驗證
+  原PWM、Chassis15ms、Cylinder和Bench回歸保留；新增RAM設定上下限、關閉／重新開啟、熱調整與非法命令檢查。
+  HTTP與前端驗證正常／動作中／STOP調燈、脫機／過期／舊韌體拒收、Dirty輸入與實際ACK同步。
+  test/run_tests.ps1與兩板compile.ps1結果見docs/verification.txt；沒有自動燒錄或驅動實車。
+
+CH13 爆閃與手動呼吸（2026-10-17，取代上述開機自動呼吸行為）
+  開機 Pin14 關燈；CH7 一般模式 CH13 開啟後立即輸出255，每50ms切換0／255（10Hz）。
+  CH13 關閉、遙控失聯／訊號失效或切進第一關模式，立即關燈；全車STOP只停馬達，燈光獨立。
+  CH7 第一關模式 CH13 仍夾雞；一般模式 CH13 不再選第五關，stage5 仍可由Web／Serial選取。
+  GUI顯示CH13爆閃／CH13關燈／手動呼吸與目前PWM，不將爆閃誤報為呼吸。
+  爆閃中 pwm.set 僅保存手動呼吸峰值與每階間隔，不改變255亮度與50ms切換。
+  未爆閃時，套用手動呼吸可暫時接管燈光；下次CH13撥動、斷線或模式切換會恢復遙控控制。
+  呼吸預設仍55／5ms，但重啟先關燈，並非重啟自動呼吸。
+  狀態新增pwm.strobe_enabled、rc_controlled、strobe_interval_ms、strobe_value、rc_channel。

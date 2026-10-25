@@ -1,0 +1,35 @@
+Robot_Integrated_Control 電動缸方向修正
+2026-10-15 / firmware_revision=bench-test-v7
+
+腳位與語意
+  include/system_config.h集中配置邏輯IN1_PIN=17、IN2_PIN=16，配合目前實體馬達極性。
+  保留現有Pin16/17實體接線，這次反轉由交換程式常數完成，不再交換線材。
+  Extend：Pin17=HIGH、Pin16=LOW；Retract：Pin17=LOW、Pin16=HIGH；Stop：兩腳LOW。
+  使用前50ms全LOW死區、完整運轉時間自實際通電起算、到時全LOW、安全STOP立即斷驅動皆保持。
+  所有stage*.yaml保持原檔；action:extend/retract的名稱、順序與duration_ms均不改。
+  HOME2仍縮回5000ms，並平行復位Pin4/6/9至2000/1400/1100；不使用MKS ID7。
+
+目前第二關六段來源
+  STEP1：Pin9=1800、Pin4=1300平行，電動缸保持。
+  STEP2：Pin9=1000、Pin4=2100平行。
+  STEP3：Retract3000ms，輸出Pin16 HIGH。
+  STEP4：Pin6緩移1000ms至550、等待1000ms、緩移1000ms回1400。
+  STEP5：Extend3000ms，輸出Pin17 HIGH。
+  STEP6：Pin4=2000、Pin9=1100平行緩移1000ms。
+  repeat_from:2，首輪1..6，之後2..6；每段完成後操作者另按NEXT，動作中不排隊。
+  GPIO沒有實際行程回授；到內部微動開關時由電動缸自身切斷，控制器只等待設定時間再關閉輸出。
+
+獨立工具與介面
+  TDK30th根目錄CYLINDER_TEST.ino以及CYLINDER_TEST/CYLINDER_TEST.ino兩份同步17/16。
+  工具Extend/Retract的Serial方向訊息由常數輸出；菜單1/e伸出、2/r縮回、0/s停止不變。
+  Web GUI的即時in1_pin/in2_pin取韌體狀態，測試fixture及固定標示同步邏輯17/16。
+
+Pin14
+  專用呼吸PWM保持8-bit，每5ms一階，亮度改0..55；完整往返理想550ms。
+  已整合main非阻塞begin/poll，與15ms底盤及電動缸動作共存；STOP不取消獨立呼吸。
+  最大55為PWM命令而非55%或55V，約21.48%佔空比；實際亮度及電壓需量測。
+
+驗證
+  原有回歸更新17/16映射及0..55端點；HOME2、STEP3、STEP5與STOP以假GPIO驗證。
+  Stage2生成表及源文件依目前六段流程檢查；沒有改動機構排程器或安全保護。
+  編譯與主機測試結果见docs/verification.txt；本次不自動燒錄或連接實車。

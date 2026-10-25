@@ -1,0 +1,12 @@
+# Stage 1 one-shot prop; FE absolute positions, 500..2500us PWM.
+stage: 1
+prop: 3
+repeat_from: 1
+steps:
+  - actions:
+      - parallel:
+          - stepper: {node: 6, position: 8000, rpm: 1000, acc: 230}
+          - servo: {pin: 5, pulse_us: 2056}
+          - servo: {pin: 2, pulse_us: 1667}
+  - actions:
+      - stepper: {node: 6, position: 0, rpm: 1000, acc: 255}

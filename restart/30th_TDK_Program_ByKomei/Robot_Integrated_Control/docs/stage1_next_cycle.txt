@@ -1,0 +1,7 @@
+第一關 NEXT 循環（2026-10-16）
+花瓶 prop2：採用 stage1_vase.yaml 四段預設。
+雞 prop4、小鳥 prop5：共用新參數；STEP3 先完成 ID6=-1000，再讓 Pin5 於1000ms緩移到1422。
+所有第一關道具：末段完成 → 再按 NEXT 執行既有 HOME14（ID6 0x91、Pin2=1150、Pin5=2100）。
+HOME 完成後 STEP0 待機；再按 NEXT 才開始 STEP1，不自動連跑，不排隊。
+HOME 時 CH4 微調暫停；重新執行 STEP1 時恢復既有微調規則。
+RC 與 Web GUI/USB 共用機構控制器邏輯。

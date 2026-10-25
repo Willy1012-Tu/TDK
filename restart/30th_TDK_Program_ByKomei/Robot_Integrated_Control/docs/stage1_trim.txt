@@ -1,0 +1,57 @@
+第一關 Pin2 的 CH4 即時微調
+2026-10-15 / Asia/Taipei
+
+開機與操作
+  燒錄新版韌體前將CH4旋鈕置中（約1500us），不要把它當成維持LOW的選關鍵。
+  啟動Web GUI、重新整理頁面並連接USB，等待控制器Ready。
+  CH7 HIGH進入第一關，選擇道具並照原NEXT/PREV流程操作。
+  CH7 MID會保留原情境；只要仍是第一關情境與實際第一關，就可以微調。
+  在動作執行中或完成保持時，CH4可即時改變Pin2輸出；其餘八顆Servo與底盤混控不受CH4影響。
+  CH4沒有新增的燒錄／RAM寫入命令，旋鈕只是即時偏移，中心位置即0。
+
+參數（include/system_config.h，SystemConfig::Rc）
+  STAGE1_TRIM_CHANNEL=4                 CRSF channels[3]
+  STAGE1_TRIM_PIN=2                     SERVO_PINS[0]
+  STAGE1_TRIM_MIN_US=1000
+  STAGE1_TRIM_CENTER_US=1500
+  STAGE1_TRIM_MAX_US=2000
+  STAGE1_TRIM_DEADZONE_US=30             1470..1530視為0
+  STAGE1_TRIM_MAX_OFFSET_US=150          ±150us
+  STAGE1_TRIM_OUTPUT_MIN_US=500
+  STAGE1_TRIM_OUTPUT_MAX_US=2500         使用者確認沿用既有Servo安全範圍
+  修改常數後重新Build/Upload；既有腳位與待機脈寬陣列不變。
+
+偏移計算
+  有效CH4先限在1000..2000，中心±30內為0；兩側扣掉死區後線性映射至±150。
+  例如1000→-150、1250→-70、1500→0、1750→+70、2000→+150（整數截斷）。
+  正常接收機允許900..2100us；有效但超出標準範圍時限到端點。
+  無效CH4（小於900或大於2100）只停用微調，不影響底盤三個搖桿軸的valid判定。
+
+基準與最終輸出
+  ServoAxis.pulse/from/target、YAML、RAM動作與PREV/entry快照維持未微調基準。
+  Pin2最終輸出=clamp(基準+CH4偏移,500,2500)。
+  例：基準1650、旋鈕+150，輸出1800；基準2450、要求+150，輸出2500、實際偏移+50。
+  旋鈕反覆更新不會累加到基準，平滑動作的原始起點／終點／完成時間也不改。
+  保持狀態與兩個緩移更新tick之間仍輪詢Pin2；僅當輸出改變才更新硬體，無阻塞delay。
+
+互鎖
+  必須startup完成、activeStage=1、CH7保留第一關情境、link與搖桿valid正常、未STOP/Fault。
+  新關卡請求或Stage1退出已被接受時，立即撤除偏移，已發出的動作依原流程完成。
+  HOME與Debug GoHome暫停微調，即使HOME完成也保持0；下一次第一關NEXT/PREV/RUN/道具觸發才恢復。
+  第一關重新正式切入也恢復可微調狀態。其他關卡（包括擲筊）不疊加CH4。
+  斷線、無效搖桿或一般情境時回基準；STOP/Fault只撤除邏輯偏移並detach Servo，
+  不會為了回基準重新打開PWM。畫面可保留STOP前最後指令，與已停用輸出區分。
+
+遙測與GUI
+  rc.stage1_trim_us：計算並經情境互鎖的旋鈕偏移。
+  pulse2_base：未疊加的Pin2步驟基準。
+  pulse2：實際最後送出的Pin2指令（STOP後為最後指令）。
+  stage1_trim_us：實際套用差值，接近安全極限時可能小於要求偏移。
+  stage1_trim_allowed：當前是否允許微調；STOP/Home/切關/其他關卡為false。
+  GUI唯讀顯示以上資訊；無效、過期或舊韌體缺少欄位時顯示未取得，不能當作實際角度回授。
+
+驗證
+  原有回歸測試把CH4預設設成1500，獨立測試才主動改旋鈕，以隔離既有機構步驟。
+  新案例涵蓋死區、映射、端點、保持、平滑動作、飽和、PREV／道具切換、HOME／退出、
+  異常通道、斷線、STOP不重啟PWM，以及15ms底盤CAN／Pin14PWM並行。
+  docs/verification.txt記錄最終結果。尚未燒錄或驗證實車舵機硬止點。

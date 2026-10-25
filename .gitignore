@@ -1,0 +1,36 @@
+﻿# PlatformIO build directories
+.pio/
+*/.pio/
+*/*/.pio/
+*/*/*/.pio/
+
+# Compilation outputs
+*.o
+*.obj
+*.elf
+*.bin
+*.hex
+*.a
+
+# Temporary folders and virtual environments
+tmp/
+*/tmp/
+*/*/.tmp*
+.venv/
+*/.venv/
+
+# Python cache
+__pycache__/
+*/__pycache__/
+*.py[cod]
+
+# IDE settings
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch/
+*.dblite
+
+# Operating system files
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,0 +1,47 @@
+Robot_Integrated_Control Pin14呼吸PWM與輪速預算
+2026-10-15 / firmware_revision=bench-test-v7
+
+集中配置
+  include/system_config.h：Chassis JOYSTICK_MAX_SPEED=90、SAFETY_MAX_SPEED=115 turns/s。
+  YawCompensation MAX_CORRECTION=25；保留既有KP=3.5、CORRECTION_SIGN=-1及LOCK_DELAY_MS=200。
+  搖桿混控先歸一化到±90，再疊加最多±25航向補償，最終每輪限幅±115；不改ODrive本機vel_limit。
+  Cylinder IN1_PIN=17、IN2_PIN=16；Pwm PIN=14、RESOLUTION_BITS=8、MAX_VALUE=55、STEP_INTERVAL_MS=5。
+  腳位檢查避免CAN／Serial2／IMU18/19／六舵機與電動缸／呼吸PWM重疊。
+
+模組與排程
+  include/pwm_controller.h、src/pwm_controller.cpp提供PwmController::begin()、poll()、currentValue()、configure()及status()。
+  setup在USB Serial初始化後準備PWM，不等MKS或ODrive握手；begin先輸出0並保持關燈。
+  loop每圈poll；開機保持關燈。CH13在一般模式控制0／255爆閃，每50ms切換；GUI可套用手動呼吸，預設峰值55、每階5ms。
+  CH13爆閃理想週期100ms；GUI手動呼吸預設全週期為55×5×2=550ms。每次輪詢只更新一階，延遲時不補發過期階數。
+  無delay／等待迴圈；32-bit millis回繞仍可正確計時，不改15ms底盤排程。
+  currentValue僅回傳最近輸出的佔空比命令，並非ADC／電壓量測。
+  全車STOP停止電動缸16/17、MKS、舵機及ODrive；Pin14獨立燈光仍按目前RC／手動模式運行，不代表全車已解鎖。
+
+接線與量測
+  配合既有實體馬達極性，程式邏輯IN1=17、IN2=16；不再對調目前16/17線材，模組與Teensy共地。
+  Pin16/17是預設Wire1腳位，本專案不啟用Wire1；BNO055仍使用Wire的18/19。
+  Pin14是硬體PWM，可量其與GND的平均電壓呼吸，不是DAC輸出或致動器供電端。
+  Teensy核心8-bit analogWrite滿量程為256；命令55約55/256（21.48%）佔空比，理想3.3V下平均約0.709V；輸出高電位仍是3.3V脈衝。
+  PJRC官方PWM說明：https://www.pjrc.com/teensy/td_pulse.html
+  波形幅值、DMM平均顯示與負載需實測；本次僅完成主機與編譯驗證，不自動燒錄或驅動實車。
+
+驗證
+  pwm_regression：開機0、5ms間隔、完整往返、逾時不補步、重begin及millis回繞。
+  system_regression：實際setup／loop同時執行PWM、底盤15ms發送及電動缸計時，STOP不改Pin14呼吸。
+  bench_regression：缺底盤／MKS時PWM仍正常輪詢；離線容錯與既有互鎖測試保留。
+  test/run_tests.ps1及tools/compile.ps1 -Board teensy40／teensy41結果見verification.txt。
+
+電動缸方向語意（2026-10-15）
+  僅交換程式腳位定義，不修改任何YAML action；邏輯IN1=17／IN2=16。保持目前實體接線，不再交換线材。
+  Extend：Pin17 HIGH、Pin16 LOW；Retract：Pin17 LOW、Pin16 HIGH；Stop：兩腳LOW。
+  HOME2依舊Retract5000ms；目前第二關STEP3 Retract3000ms、STEP5 Extend3000ms，均由原檔執行。
+  Pin14亮度0→55→0，每5ms一階；8-bit解析度保持，理想週期550ms。詳見docs/cylinder_direction.txt。
+
+GUI即時調整（2026-10-15）
+  Pin14共用面板支持最高亮度0..255與每階間隔1..1000ms，按套用即改RAM；最高0關閉。
+  可恢復韌體預設55／5ms；重啟回55／5ms，YAML與硬體接線不變；初次使用需上傳新版韌體。
+  詳見docs/pwm_gui.txt；機構忙碌或STOP不阻止調燈，仍須USB連接／即時狀態／pwm能力。
+
+2026-10-17 現行燈條模式
+  Pin14開機關燈；一般遙控模式CH13控制0／255爆閃，每50ms切換；CH13關閉／失聯／切進第一關即關燈。
+  手動呼吸參數仍可從GUI調整；爆閃優先，爆閃中只保存呼吸設定。詳見docs/pwm_gui.txt。

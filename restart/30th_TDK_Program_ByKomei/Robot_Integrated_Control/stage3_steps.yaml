@@ -1,0 +1,67 @@
+# Web GUI 編輯；立即套用至 RAM，或重新 Build / Upload 作為開機預設。
+stage: 3
+repeat_from: 2
+steps:
+- actions:
+  - parallel:
+    - stepper:
+        node: 4
+        position: 7100
+        rpm: 3000
+        acc: 254
+    - stepper:
+        node: 5
+        position: -7100
+        rpm: 3000
+        acc: 254
+    - servo:
+        pin: 3
+        pulse_us: 1580
+        duration_ms: 400
+- actions:
+  - parallel:
+    - stepper:
+        node: 4
+        position: 0
+        rpm: 50
+        acc: 1
+    - stepper:
+        node: 5
+        position: 0
+        rpm: 50
+        acc: 1
+    - servo:
+        pin: 3
+        pulse_us: 1750
+        duration_ms: 300
+- actions:
+  - parallel:
+    - stepper:
+        node: 4
+        position: 4000
+        rpm: 320
+        acc: 2
+    - stepper:
+        node: 5
+        position: -4000
+        rpm: 320
+        acc: 2
+    - servo:
+        pin: 3
+        pulse_us: 1620
+        duration_ms: 400
+- actions:
+  - parallel:
+    - stepper:
+        node: 4
+        position: 7100
+        rpm: 320
+        acc: 2
+    - stepper:
+        node: 5
+        position: -7100
+        rpm: 320
+        acc: 2
+    - servo:
+        pin: 3
+        pulse_us: 1580

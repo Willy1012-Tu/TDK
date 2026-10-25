@@ -1,0 +1,97 @@
+Robot_Integrated_Control 開機工作電流、選擇性尋零與XY-160D
+2026-10-14 / 韌體 bench-test-v7
+
+檯面單關獨立測試（目前預設開啟）
+  SystemConfig::BENCH_TEST_MODE=true；修改include/system_config.h的預設值後Build／Upload生效。
+  遙控器必須連線、搖桿通道有效且未全車STOP；機構選關／NEXT／PREV不要求ODrive在線或state8。
+  底盤自身仍維持四輪健康、置中500ms及15ms排程；缺ODrive時保持LOCKED、輪速0，不等於機構鎖住。
+  每顆MKS開機8C／83／F3／92無有效ACK達10秒，記錄Bench warning並標記offline／unreferenced後略過。
+  CAN無法排入亦於500ms略過，避免整條匯流排無電時卡死；不因這些開機缺回報觸發全車STOP。
+  僅在線且已建立零點的軸執行FE；離線／未參考軸的STEP、PREV、HOME及回程略過、不等ACK。
+  .active只表示正在運動，與新增.online分開，閒置但在線的馬達不會被誤判為離線。
+  ID6在線時仍開機91尋零；若10秒沒有開始回報，先盡力停止該軸再略過；已開始後無完成仍真故障STOP。
+  ACK0、運動拒絕、已在線運動失去回報、PWM初始化失敗及操作者STOP保持原保護。
+  status新增bench_test_mode、motor_online_mask及motor_offline_mask，bit0／1／2為ID4／5／6；零點用position_known_mask。
+  online是開機通訊確認，不是MKS心跳或持續線路偵測；offline需重啟重新檢查，遲到ACK不使軸自動加入。
+  第二關無MKS，GPIO電動缸與Pin4／6／9仍照原HOME2與六段流程；GPIO／PWM沒有接線自動偵測。
+  回到比賽互鎖時把BENCH_TEST_MODE改false並重新Build／Upload；主機回歸另外驗證true與false兩路。
+  單關測試接線、等待與判讀見docs/bench_test.txt。
+
+硬體與集中配置
+  CAN1為1Mbps，MKS僅ID4、5、6。ID7已完全移出啟用／電流／尋零／Debug清單。
+  MOTOR_IDS={4,5,6}；STATIONARY_ZERO_IDS={4,5}；HOMING_IDS={6}。
+  STARTUP_CURRENT_SETTINGS={{4,3000},{5,3000},{6,5200}}，MAX_CURRENT_MA=5200。
+  83設定working current（面板Ma），與HM_Ma或HoldMa不同；不更改模式、HM、鮑率或自動80校正。
+  SERVO_PINS={2,3,4,5,6,9}；待機脈寬固定{1150,2250,2000,2100,1400,1100}。
+  SystemConfig::Cylinder集中IN1_PIN=17、IN2_PIN=16、DEFAULT_TIMEOUT_MS=6000、HOME_RETRACT_MS=5000。
+  MAX_DURATION_MS=60000、REVERSAL_DEADTIME_MS=50；GPIO與CAN／UART／I2C／PWM腳位在編譯期檢查無重疊。
+
+分檔責任
+  include/system_config.h：全車硬體、電流與時間參數；編譯期檢查有效ID、電流上限與腳位。
+  include/cylinder_types.h：CylinderAction Stop0／Extend1／Retract2與CylinderCommand。
+  src/cylinder_controller.cpp／include/cylinder_controller.h：獨立GPIO驅動、LOW/LOW保護間隔、計時及Stop。
+  include/mechanism_config.h：ActionKind::Cylinder與HOME2；各關與YAML生成表的公共型別。
+  src/mechanism_controller.cpp：開機設定ACK屏障、parallel等待、選關安全回程、RAM交換及回退快照。
+  src/serial_gateway.cpp：USB狀態與Debug／RAM指令；只讀status不會重發83或讓電動缸运動。
+  src/system_safety.cpp：故障／USB／Web STOP鎖存全車；機構先關閉電動缸GPIO，再排入馬達停止指令。
+  main.cpp未增排程；既有CAN、RC、15ms底盤、IMU及USB各模組poll維持非阻塞。
+
+開機流程
+  電動缸先LOW/LOW，再設兩腳OUTPUT；PWM到待機。電動缸開機不伸縮。
+  每軸依序確認：ID4 8C→83(3000mA) ACK1→F3；ID5相同；ID6 8C→83(5200mA) ACK1→F3。
+  一般模式三軸全部設定確認後，ID4／5各92原位建立FE零點，收到有效ACK1才標記positionKnown。
+  STARTUP_RETURN_ZERO=true：僅ID6發91依既有HM找限位，全接線時開始ACK1→完成ACK2才Ready；Bench缺軸依上述規則略過。
+  不發ID7的8C／83／F3／91，不等待其ACK。ID4／5禁止91；開機不執行任何關卡STEP。
+  position_known_mask與current_configured_mask皆使用bit0/1/2=ID4/5/6，全部確認值7。
+  零點mask與電流mask用途不同；確認值7不能代替phase=ready或實體位置感測。
+
+關卡HOME與切關
+  HOME1／4：ID6 91及Pin2=1150、Pin5=2100；HOME3：FE4/5=0／0與Pin3=2250，禁止91。
+  HOME2：電動缸縮回5000ms及Pin4/6/9=2000/1400/1100；計時到LOW/LOW，不使用CAN ID7。
+  第二關切入先HOME2，顯示home_wait／STEP0；完成後Ready，NEXT從STEP1開始。
+  普通切關先復位舊有效profile：第一／四關FE6=0；第三關Park FE4/5=0／0、320RPM／ACC0。
+  第二關離關縮回5000ms；自訂profile含缸動作時也納入安全縮回，其他使用過的軸FE回0、舵機回待機。
+  有電動缸執行／尚未派發時切關立即LOW/LOW並取消舊缸後續指令，已送MKS／伺服等待屏障後安全回程。
+  純MKS／伺服STEP仍等完整當段再回程；只保留最新pending目標，保留原第一關退出與HOME去重。
+  每次伸縮前LOW/LOW 50ms；運行時間從實際HIGH算起。第二關Ready0只能在完整入關HOME2後成立。
+  RAM commit先舊表回程、再交換新表；第二關另完成入關HOME2。Bridge最多60秒等Ready／新版本／身份匹配。
+  CH7 LOW仍等待第一關完整STEP，以ID6 91退出並預設第四關；其他道具／關卡設定保留。
+
+83封包（十六進位bytes）
+  CAN1標準資料幀、非remote、DLC4：[83, mA高位, mA低位, checksum]。
+  checksum=(CAN ID+83+高位+低位)&FF；使用保存格式。
+  ID4 3000mA：83 0B B8 4A；ID5：83 0B B8 4B；ID6 5200mA：83 14 50 ED。
+  回覆DLC3：[83,status,checksum]，匹配CAN1 ID／命令且checksum正確才接受。
+  status0拒絕→Fault／全車STOP；status1保存成功才接續F3；status2不作保存成功，仍等待／重試。
+  8C／83／F3／92每500ms非阻塞重試，自首次成功排入CAN起固定10000ms ACK期限，重試不延長。
+  CAN enqueue另有500ms上限；錯ID／命令／checksum忽略；91／FE運動成功排入CAN後不因缺回報而重送。
+  STOP鎖存至重啟，遲到ACK不會使初始化或運動恢復。
+
+USB診斷
+  @1 status或@1 hello；firmware_id=Robot_Integrated_Control，firmware_revision=bench-test-v7。
+  motor_ids=[4,5,6]、startup_home_ids=[6]、startup_hold_ids=[4,5]；不回報position7／current7_ma。
+  startup_current_settings包含4=3000、5=3000、6=5200；current4_ma／current5_ma／current6_ma為ACK確認設定值。
+  current_queue／current_wait為83階段；startup_node／startup_command／startup_attempts／notice定位失敗。
+  startup_command十進位：140=8C、131=83、243=F3、146=92、145=91。
+  cylinder回報action、active、duration_ms／remaining_ms、兩腳位與電平、reference_action／reference_known。
+  電動缸只有定時參考，不讀內置微動開關，不存在脈衝／實測行程或CAN ACK。
+  Debug命令：@req debug.cylinder <0|1|2> <ms>；運動1..60000ms，Stop0..60000ms。
+  Stop0立即LOW；Stop正時間保持LOW等待。伸／縮預設6000ms；所有等待為非阻塞。
+  軟體STOP／Fault立即LOW/LOW；既有實體急停沒有MCU訊號，外部斷電停止，韌體不宣稱能讀取按鍵。
+
+交付範圍
+  本次僅Robot_Integrated_Control；未修改Stage4_Mechanism_Test、Chassis_Control_Remote_Test。
+  修改後Build／Upload才更新控制板，GUI啟動或讀status不更新韌體；本次驗證未燒錄或連實車串口。
+  docs/verification.txt記錄主機回歸、兩板編譯及GUI啟動證據。
+
+Pin14呼吸PWM與方向修正（2026-10-15）
+  電動缸邏輯IN1=Pin17、IN2=Pin16，Pin14專用於0→55→0的8-bit呼吸PWM，每5ms變動一階。
+  PwmController以begin／poll非阻塞排程，與15ms底盤CAN及舵機／電動缸計時互不等待；STOP只停機構，呼吸仍繼續。
+  這次僅交換程式邏輯IN1／IN2定義，保留現有16／17接線；Pin14不可接電動缸，本配置不啟用Wire1，IMU仍用18／19。
+  詳見docs/pwm_breathing.txt；主機回歸不能代替實車速度與電壓量測。
+
+電動缸方向語意（2026-10-15）
+  僅交換程式腳位定義，不修改任何YAML action；邏輯IN1=17／IN2=16。保持目前實體接線，不再交換线材。
+  Extend：Pin17 HIGH、Pin16 LOW；Retract：Pin17 LOW、Pin16 HIGH；Stop：兩腳LOW。
+  HOME2依舊Retract5000ms；目前第二關STEP3 Retract3000ms、STEP5 Extend3000ms，均由原檔執行。
+  Pin14亮度0→55→0，每5ms一階；8-bit解析度保持，理想週期550ms。詳見docs/cylinder_direction.txt。

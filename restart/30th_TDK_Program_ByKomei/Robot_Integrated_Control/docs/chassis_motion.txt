@@ -1,0 +1,100 @@
+底盤加減速與 ICR 旋轉中心
+2026-10-15
+
+CH14 繞境專用參數：include/system_config.h，SystemConfig::Chassis::Procession
+  RAMP_ENABLED = true，ACCEL_TURNS_S2 = 90，DECEL_TURNS_S2 = 180。
+  ICR_X_MM = 0，ICR_LEFT_Y_MM = 0，ICR_RIGHT_Y_MM = 0（mm，左右轉預設皆繞車身中心）。
+  前後／左右輪距使用已量測的260／320mm；左右轉Y允許任意正負，不強制左負右正。
+  CH7 LOW一般模式撥CH14 HIGH，選繞境底盤設定；CH7 MID保持前一模式。
+  繞境平移座標與CH10相同：第二關方向(-F,-S)。機構仍維持原有關卡、段數與動作。
+  CH14選擇本身不發機構回位、尋零或電動缸指令；若原本正在動作，它仍依原計畫繼續。
+  一般模式CH10..14採最近穩定HIGH優先；釋放後回退仍HIGH中最近選過者。
+  CH14 LOW且沒有其他HIGH時回一般底盤參數與目前機構方向。
+  CH7 HIGH第一關模式時，CH14仍用來夾小鳥；LOW退出時，按住的CH14須先放開再按，才可進入繞境。
+  NEXT/PREV保留原本機構選擇與Ready檢查，僅明確按下按鈕才執行，CH14不自動觸發。
+  四顆ODrive解鎖／斷線鎖定、全域STOP、機構故障停止等規則仍適用。
+
+一般底盤參數：include/system_config.h，SystemConfig::Chassis
+  RAMP_ENABLED = true                  啟用線性輪速加減速
+  ACCEL_TURNS_S2 = 90.0                每秒增加多少 turns/s
+  DECEL_TURNS_S2 = 180.0               每秒減少多少 turns/s
+  WHEELBASE_MM = 260.0                 前後輪心距離（使用者提供 26cm）
+  TRACK_WIDTH_MM = 320.0               左右輪心距離（使用者提供 32cm）
+  ICR_X_MM = 0.0                       左右轉共用旋轉中心 X，mm，朝原車頭為正
+  ICR_LEFT_Y_MM = 0.0                   左轉中心 Y，預設車身中心
+  ICR_RIGHT_Y_MM = 0.0                  右轉中心 Y，預設車身中心
+  ICR_LEFT_ROTATE_SIGN = 1              正旋轉桿為左轉；若實車相反可改為 -1
+  修改這裡後重新 Build/Upload，即成為下次開機預設。
+  不依賴輪徑：目前輸入／輸出以 ODrive turns/s 表示，ICR 使用偏移量／半輪距和的比例。
+  搖桿上限90、每輪安全上限115 turns/s；航向補償已移除。
+
+旋轉中心例子（左右轉各一個 Y、共用 X；固定在原車身座標，不跟著選關旋轉）
+  車身中心    X=0     Y=0
+  右前輪心    X=130   Y=160
+  左前輪心    X=130   Y=-160
+  右後輪心    X=-130  Y=160
+  左後輪心    X=-130  Y=-160
+  車頭前方    X=500   Y=0
+  一般與CH14繞境預設左右轉皆選 (0,0)，兩側距離仍可分別設定。
+  原車頭前進為 X 正、車身右側為 Y 正；預設依既有正旋轉＝左轉／逆時針慣例選側。
+  ICR_LEFT_ROTATE_SIGN 只切換中心選擇，不改輪子電氣方向。實車旋轉方向尚未驗證。
+  X/Y 可設至 -5000..5000mm，包括車身外部的點。
+  只給旋轉桿時，選定點為零平移速度的旋轉中心；同時給平移桿則疊加平移，該點不再固定。
+  第一／二關平移手感仍分別為 (-S,F)、(-F,-S)，第三／四／五關維持 (F,S)。
+  旋轉桿電氣極性延用既有輪速符號；X/Y 以原車頭與車身右側為準，不能當場地定位點使用。
+
+GUI 操作
+  燒錄新版韌體，重新啟動 tools/start_web_gui.ps1，重新整理網頁並連接 USB。
+  「底盤加減速與旋轉中心」面板可設定加速度、減速度、前後／左右輪距、共用 ICR X、左轉 ICR Y、右轉 ICR Y。
+  將搖桿置中，等輪速指令降到0後，按「套用底盤設定 / RAM」。
+  「左右旋轉中心皆設為 (0, 0)」只編輯欄位，仍需按套用。
+  正在行駛、解鎖中或全車STOP時，韌體會拒絕修改；舊／過期狀態也不接受。
+  開啟面板與編輯欄位不會送出輪速命令。設定成功後等待實際狀態確認，輪詢不覆蓋未套用輸入。
+  GUI會標示目前調整「一般底盤」或「CH14繞境」。兩份設定獨立保存在RAM。
+  切換模式時，未套用草稿會清除並載入新模式，避免誤寫；寫入時韌體再次核對模式編號。
+  GUI設定僅寫 RAM；重啟恢復兩份 system_config.h 預設值。若要永久保留，修改對應命名空間再燒錄。
+  GUI／USB參數使用整數，速率1..10000 turns/s²、輪距1..5000mm、X/Y各±5000mm。
+
+USB 通訊（@後面是請求編號）
+  @1 chassis.motion 1 90 180 260 320 0 0 0 0
+  順序：啟用漸變(0/1) 加速度 減速度 前後輪距 左右輪距 ICR_X ICR_LEFT_Y ICR_RIGHT_Y 預期模式(0一般／1繞境)
+  上例僅在一般模式生效；模式已切換則拒絕。舊8參數格式僅允許修改一般模式，舊7參數拒絕。
+  @2 chassis.motion 1 90 180 260 320 0 0 0 1
+  上例僅在CH14繞境模式生效，恢復繞境預設的車身中心旋轉。
+  @3 status
+  chassis.motion 回報 available/editable/ramp_enabled、accel/decel、輪距、icr_x_mm/icr_left_y_mm/icr_right_y_mm 與target四輪目標。
+  icr_mode=directional 表示支援雙側中心；profiles=true、profile_id=0/1回報目前參數庫，rc.procession_mode回報RC選擇。
+  GUI 必須更新並重啟，舊韌體會停用套用按鈕。
+  chassis.wheels[].velocity 是漸變後已送出的輪速指令，兩者在加減速時不同。
+  USB回覆緩衝擴為4096bytes以容納新的設定與目標回報，仍使用非阻塞收發與STOP優先。
+
+加減速實際行為
+  每15ms更新一次輪速，預設純前進0到90約1秒，90回0約0.5秒。
+  此為最大變化速率限制；混合移動時受最嚴格的輪子限制，可能較慢。
+  四輪使用共同插值比例，保留可實現的麥克納姆輪向量；從零開始的固定ICR純旋轉保持輪速比例。
+  反向先減至零，再加速到反方向。切關立即更新目標座標系，但已送出的速度依加減速平順轉換。
+  旋轉桿回中（含死區）使用車身中心；不再進行航向補償。
+  左右反打時目標立即換側，已送出輪速依加減速過渡；過渡期間不能視為固定單一 ICR。
+  這是麥克納姆輪的雙側旋轉中心，不會自動轉成汽車前輪轉角／倒車轉向控制；前後平移仍由搖桿決定。
+  搖桿與IMU合成目標後才做加減速，最後送出的輪速始終在±115以內。
+  主迴圈延遲時最多計入50ms漸變時間，不追補出突然的大速度跳變。
+  斷線、ODrive錯誤、CAN送出失敗、全域STOP直接清零並停用底盤，不等待減速。
+  此模組限制命令變化率；未提供輪速量測／里程計／場地XY自動導航，也不是jerk限制的S曲線。
+
+架構
+  chassis_math.h：各關平移轉換、任意ICR輪速基底、搖桿與IMU速度預算。
+  chassis_ramp.h：四輪同步加減速數學，不讀硬體或等待。
+  chassis_controller.cpp：15ms排程、故障立即停車、停止時RAM調參與狀態。
+  serial_gateway.cpp：嚴格解析 chassis.motion 與JSON回報。
+  tools/web_gui.py、web/：欄位編輯／狀態檢查與RAM套用。
+
+驗證
+  新回歸使用真實controller/main與預設啟用的漸變，涵蓋輪角／車外ICR、純平移、加減速、反向、
+  延遲上限、millis回繞、15ms CAN、斷線／STOP、GPIO電缸／PWM並行。
+  原有RC／關卡方向測試明確關閉漸變以隔離既有方向／狀態機斷言；新motion測試專門驗證實際預設輸出。
+  不改任何stage*.yaml。任務開始時第二關已是STEP3 Extend、STEP5 Retract、STEP6 Pin4/9=1300/1800，
+  因舊測試仍期待先前版本，測試預期已同步現有檔案。
+  最終編譯與回歸結果見docs/verification.txt。尚未燒錄或驗證實車輪距／滾輪安裝／打滑。
+
+ICR運動學參考（此專案依既有 +Y向右／輪子電氣符號換算）
+  https://docs.wpilib.org/en/stable/docs/software/kinematics-and-odometry/mecanum-drive-kinematics.html

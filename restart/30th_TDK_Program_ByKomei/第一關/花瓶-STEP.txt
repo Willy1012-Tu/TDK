@@ -1,0 +1,16 @@
+steps:
+  - actions:
+      - parallel:
+          - stepper: {position: 8000, rpm: 1000, acc: 230}
+          - servo: {pin: 5, pulse_us: 2056}
+          - servo: {pin: 2, pulse_us: 1833, duration_ms: 0}
+  - actions:
+      - servo: {pin: 2, pulse_us: 2111, duration_ms: 0}
+  - actions:
+      - parallel:
+          - stepper: {position: 1800, rpm: 1000, acc: 245}
+          - servo: {pin: 2, pulse_us: 1389}
+  - actions:
+      - parallel:
+          - stepper: {position: -1000, rpm: 1000, acc: 235}
+          - servo: {pin: 2, pulse_us: 1333}

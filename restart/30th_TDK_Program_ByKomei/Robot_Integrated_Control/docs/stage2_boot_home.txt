@@ -1,0 +1,33 @@
+第二關電動缸開機歸位（2026-10-17）
+  上電先將Pin17／16輸出LOW/LOW，再等待50ms後啟動Retract；縮回運行5000ms後自動停止。
+  縮回與MKS步進開機初始化並行，兩者完成才Ready。這不是額外串接5秒；開機至少約5.05秒，MKS較慢時以MKS為準。
+  開機整段縮回完成後，切入第二關設Pin9=1800、Pin4=1300（打開），Pin3=1580；Pin6維持既有待機，可直接NEXT，不再重等5秒。
+  電缸伸出、短縮回或被STOP中止時，不視為已完整縮回；需要時切關仍完整縮回。
+  手動HOME仍完整縮回，保留重新校準計時基準的操作。
+
+設定位置
+  include/system_config.h → SystemConfig::Cylinder::HOME_RETRACT_MS（目前5000ms）。
+  REVERSAL_DEADTIME_MS為開始／換向前LOW/LOW等待（目前50ms）。Pin17／16僅數位方向控制，未使用PWM。
+
+GUI與安全
+  cylinder.fully_retracted代表『完整縮回計時已完成』，不是限位開關回授，也不能保證實體確已到底。
+  GUI顯示剩餘時間、整段回縮計時標記；booting期間NEXT／PREV停用，STOP優先且不會自行重啟縮回。
+  開機硬體未供電時，即使計時結束也無法由軟體確認到位；供電後可手動HOME重新完整縮回。
+
+
+第二關入關與CH4雙步進高度微調
+  一般模式選第二關後，入關姿態為Pin9=1800us、Pin4=1300us、Pin3=1580us；不改全車開機SERVO_START_US陣列。
+  使用目前stage2_steps.yaml動作；不覆寫或插入使用者調過的YAML STEP。
+  ID4與ID5均已初始化、坐標已知且未隔離時，STEP0待機即可微調；執行正式STEP期間等待原動作完成。
+  CH4置中偏移0，預設共同偏移範圍±1600脈衝：
+    ID4目標=ID4基準+offset，必須≥0。
+    ID5目標=ID5基準-offset，必須≤0。
+  上下界以同一offset截斷，保持兩顆反向等量；例：基準0/0時，要求-800會共同截為0，不會超越零點。
+  微調以100RPM、ACC5運行，每100ms最多更新一組，需兩顆各自完成ACK後才接受NEXT。
+  完成偏移與步驟基準分開記錄，不累加、不改STEP/PREV歷史。
+  失聯、HOME、Debug、切關、STOP停用微調；HOME後由下一次NEXT/PREV正式STEP重新啟用。
+  切出第二關回復ID4/5的FE絕對0與伺服開機待機值；4/5不發0x91。
+  GUI新增「第二關雙步進高度旋鈕微調」面板，顯示CH4、要求／完成共同偏移、兩軸基準／完成位置／已送目標。
+  遙測欄位：position4_base、position5_base、stage2_trim_pulses、stage2_trim_target4/5、
+    stage2_trim_allowed、stage2_trim_moving與rc.stage2_trim_pulses。
+  顯示值是指令與完成回報，不是即時編碼器位置；舊韌體未提供欄位時顯示未支援，不會發出額外控制指令。
