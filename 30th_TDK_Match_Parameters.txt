@@ -46,7 +46,7 @@ steps:
 
 
 燒入程式
-cd "C:\Users\User\OneDrive\桌面\TDK30th\restart\30th_TDK\Robot_Integrated_Control"
+cd "C:\Users\User\OneDrive\桌面\TDK30th\30th_TDK\Robot_Integrated_Control"
 powershell -ExecutionPolicy Bypass -File .\tools\pio.ps1 run -e teensy40 -t upload
 
 打開web
